@@ -1,8 +1,47 @@
-# 📄 LiteDoc
+<div align="center">
+  <h1>📄 LiteDoc</h1>
+  <p><b>A 100% Local, Browser-Based PDF to Markdown Converter.</b></p>
+  
+  [![Try it Live](https://img.shields.io/badge/🚀_Try_LiteDoc_Live-litedoc.xyz-6366f1?style=for-the-badge)](https://litedoc.xyz/)
+  [![GitHub stars](https://img.shields.io/github/stars/0xovo/LiteDoc?style=for-the-badge&color=eab308)](https://github.com/0xovo/LiteDoc/stargazers)
+  [![Twitter Follow](https://img.shields.io/badge/Follow_@0xovoo-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/0xovoo)
 
-**A 100% Local, Browser-Based PDF to Markdown Converter.**
+  <br />
+  
+  <i>LiteDoc is a zero-setup, client-side tool built to extract text, images, tables, and math from PDFs. Save your LLM tokens and avoid wrestling with heavy backend environments—just drop your file in the browser and get clean Markdown.</i>
+</div>
 
-LiteDoc is a zero-setup, client-side tool built to extract text, images, tables, and math from PDFs. Save your LLM tokens and avoid wrestling with heavy backend environments—just drop your file in the browser and get clean Markdown.
+---
+
+## 📸 See it in Action
+
+**Full Main UI with Files Loaded**
+<p align="center">
+  <img alt="Full Main UI" src="https://github.com/user-attachments/assets/c7efadbc-84c5-4ec1-a586-b54a38852581" width="100%" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <b>📝 Editor View</b><br>
+      <img alt="Editor View" src="https://github.com/user-attachments/assets/7951682e-8681-446b-a265-5f25500c412a" width="100%" />
+    </td>
+    <td width="50%" valign="top">
+      <b>📂 Explorer View</b><br>
+      <img alt="Explorer View" src="https://github.com/user-attachments/assets/a2f79d42-588e-48aa-a85c-3c83d30c5275" width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>⏳ Loading Process</b><br>
+      <img alt="Loading Process" src="https://github.com/user-attachments/assets/60141156-5c43-46bb-bab9-10323501af60" width="100%" />
+    </td>
+    <td width="50%" valign="top" align="center">
+      <b>⚙️ Settings</b><br>
+      <img alt="Settings View" src="https://github.com/user-attachments/assets/a8446842-49f8-41c6-a189-38ea42e90a9c" width="45%" />
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -56,6 +95,12 @@ LiteDoc relies on a powerful stack of client-side libraries:
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome! Since the goal is to keep the tool accessible and server-free, any PRs should adhere to the "100% client-side" philosophy.
+
+## 💬 Connect & Socials
+
+- 🌐 **Website:** [litedoc.xyz](https://litedoc.xyz/)
+- 🐙 **GitHub Repo:** [0xovo/LiteDoc](https://github.com/0xovo/LiteDoc)
+- 🐦 **Twitter / X:** [@0xovoo](https://x.com/0xovoo)
 
 ## ☕ Support
 
