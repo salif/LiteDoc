@@ -2,6 +2,7 @@
 """
 build_prod.py — Production Bundler
 Bundles src/ into a single self-contained dist/index.html.
+Excludes benchmark and SEO assets.
 """
 
 import re
@@ -131,7 +132,7 @@ def inline_into_html(html: str, css_blob: str, js_blob: str) -> str:
     html = html.replace("</head>", style_tag + "</head>", 1) if "</head>" in html else style_tag + html
 
     # Local JS
-    local_script = re.compile(r'<script\b[^>]*src=["\'](?!https?://)([^"\']+)["\'][^]*>\s*</script>', re.IGNORECASE)
+    local_script = re.compile(r'<script\b[^>]*src=["\'](?!https?://)([^"\']+)["\'][^>]*>\s*</script>', re.IGNORECASE)
     html = local_script.sub("", html)
 
     # Remote JS
