@@ -24,9 +24,7 @@ DIST_DIR = PROJECT_ROOT / "dist"
 OUT_FILE = DIST_DIR / "index.html"
 CACHE_DIR = PROJECT_ROOT / ".build_cache"
 
-# If your files exist with these names they'll be used in this order.
-# Anything in src/css/ or src/js/ NOT in these lists gets appended automatically,
-# so you never silently lose a file just because it's not listed here.
+
 CSS_PREFERRED_ORDER = ["css/main.css", "css/addons.css", "css/mobile.css"]
 JS_PREFERRED_ORDER  = [
     "js/utils.js", "js/state.js", "js/terminal.js", "js/ui.js",
