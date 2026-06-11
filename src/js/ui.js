@@ -91,10 +91,22 @@ function toggleTheme() {
         const mathKnob = document.getElementById('math-toggle-knob');
         if (state.mathEnabled) {
             if (mathBtn) mathBtn.style.background = 'var(--accent)';
-            if (mathKnob) { mathKnob.style.right = '2px'; mathKnob.style.left = ''; }
+            if (mathKnob) mathKnob.style.transform = 'translateX(20px)';
         } else {
             if (mathBtn) mathBtn.style.background = 'var(--border)';
-            if (mathKnob) { mathKnob.style.left = '2px'; mathKnob.style.right = ''; }
+            if (mathKnob) mathKnob.style.transform = 'translateX(0)';
+        }
+
+        const rawEnabledRaw = localStorage.getItem('litedoc-raw-mode');
+        state.rawTextMode = rawEnabledRaw === 'true';
+        const rawBtn = document.getElementById('rawtext-toggle-btn');
+        const rawKnob = document.getElementById('rawtext-toggle-knob');
+        if (state.rawTextMode) {
+            if (rawBtn) rawBtn.style.background = 'var(--accent)';
+            if (rawKnob) { rawKnob.style.transform = 'translateX(20px)'; rawKnob.style.background = '#fff'; }
+        } else {
+            if (rawBtn) rawBtn.style.background = 'var(--bg-input)';
+            if (rawKnob) { rawKnob.style.transform = 'translateX(0)'; rawKnob.style.background = 'rgba(255,255,255,0.4)'; }
         }
     });
 })();
@@ -123,14 +135,15 @@ function toggleFullscreen() {
 function toggleMathRendering() {
     state.mathEnabled = !state.mathEnabled;
     localStorage.setItem('litedoc-math-enabled', state.mathEnabled);
+
     const btn = document.getElementById('math-toggle-btn');
     const knob = document.getElementById('math-toggle-knob');
     if (state.mathEnabled) {
         if (btn) btn.style.background = 'var(--accent)';
-        if (knob) { knob.style.right = '2px'; knob.style.left = ''; }
+        if (knob) knob.style.transform = 'translateX(20px)';
     } else {
         if (btn) btn.style.background = 'var(--border)';
-        if (knob) { knob.style.left = '2px'; knob.style.right = ''; }
+        if (knob) knob.style.transform = 'translateX(0)';
     }
     if (state.currentViewMode === 'rendered' && state.currentViewType === 'md') {
         const data = state.processedData[state.activeDataIndex];
@@ -219,6 +232,7 @@ function navigateImage(dir) {
 function toggleAutoResolve() {
     state.autoResolveEnabled = !state.autoResolveEnabled;
     localStorage.setItem('litedoc-ar-enabled', state.autoResolveEnabled);
+
     const btn = document.getElementById('autoresolve-toggle-btn');
     const knob = document.getElementById('autoresolve-toggle-knob');
     const sub = document.getElementById('autoresolve-submenu');
@@ -230,6 +244,27 @@ function toggleAutoResolve() {
         if (btn) btn.style.background = 'var(--border)';
         if (knob) knob.style.transform = 'translateX(0)';
         if (sub) sub.classList.add('hidden');
+    }
+}
+
+// Raw Text Dump Toggle
+function toggleRawTextMode() {
+    state.rawTextMode = !state.rawTextMode;
+    localStorage.setItem('litedoc-raw-mode', state.rawTextMode);
+
+    // Communicate to addons.js that raw mode turned on
+    if (state.rawTextMode && window.__litedocAddons && window.__litedocAddons.onRawModeToggled) {
+        window.__litedocAddons.onRawModeToggled(true);
+    }
+
+    const btn = document.getElementById('rawtext-toggle-btn');
+    const knob = document.getElementById('rawtext-toggle-knob');
+    if (state.rawTextMode) {
+        if (btn) btn.style.background = 'var(--accent)';
+        if (knob) { knob.style.transform = 'translateX(20px)'; knob.style.background = '#fff'; }
+    } else {
+        if (btn) btn.style.background = 'var(--bg-input)';
+        if (knob) { knob.style.transform = 'translateX(0)'; knob.style.background = 'rgba(255,255,255,0.4)'; }
     }
 }
 
@@ -546,6 +581,7 @@ async function copyCurrentFile() {
 window.toggleTheme = toggleTheme;
 window.toggleMathRendering = toggleMathRendering;
 window.toggleAutoResolve = toggleAutoResolve;
+window.toggleRawTextMode = toggleRawTextMode;
 window.setAutoResolveAction = setAutoResolveAction;
 window.setImgRes = setImgRes;
 window.setViewMode = setViewMode;

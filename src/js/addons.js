@@ -946,6 +946,19 @@
                 settings[key] = !settings[key];
                 btn.classList.toggle('on', settings[key]);
                 persist();
+                
+                // If a layout formatter is turned ON, Raw Text Mode must be turned OFF
+                if (settings[key] && (key === 'tablesEnabled' || key === 'vectorsEnabled' || key === 'citationsEnabled')) {
+                    if (window.state && window.state.rawTextMode) {
+                        window.state.rawTextMode = false;
+                        localStorage.setItem('litedoc-raw-mode', false);
+                        const rBtn = document.getElementById('rawtext-toggle-btn');
+                        const rKnob = document.getElementById('rawtext-toggle-knob');
+                        if (rBtn) rBtn.style.background = 'var(--bg-input)';
+                        if (rKnob) { rKnob.style.transform = 'translateX(0)'; rKnob.style.background = 'rgba(255,255,255,0.4)'; }
+                    }
+                }
+
                 const dep = block.querySelector(`[data-when="${key}"]`);
                 if (dep) dep.style.display = settings[key] ? '' : 'none';
             });
@@ -984,6 +997,21 @@
         }
     }
 
+    function onRawModeToggled(isRawOn) {
+        if (!isRawOn) return;
+        const keysToDisable = ['tablesEnabled', 'vectorsEnabled', 'citationsEnabled'];
+        let changed = false;
+        keysToDisable.forEach(key => {
+            if (settings[key]) {
+                settings[key] = false;
+                changed = true;
+                const btn = document.querySelector(`.ld-addon-toggle[data-key="${key}"]`);
+                if (btn) btn.classList.remove('on');
+            }
+        });
+        if (changed) persist();
+    }
+
     window.__litedocAddons = {
         loadPdfWithPassword,
         ocrCanvas,
@@ -993,6 +1021,7 @@
         clearOcrQueue,
         triageFiles,
         _settings: settings,
+        onRawModeToggled
     };
 
     if (document.readyState !== 'loading') buildSettingsUI();

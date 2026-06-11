@@ -96,3 +96,54 @@ window.startConversion = async function (filesToProcess) {
         }
     }
 };
+
+// 5. Progressive Web App (PWA) Support
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later.
+    deferredPrompt = e;
+});
+
+window.installPWA = async function() {
+    if (deferredPrompt) {
+        // Show the install prompt
+        deferredPrompt.prompt();
+        // Wait for the user to respond to the prompt
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response to the install prompt: ${outcome}`);
+        // We've used the prompt, and can't use it again, throw it away
+        deferredPrompt = null;
+    } else {
+        // Fallback for iOS / Desktop without prompt
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+        let message = "To install this app:\n\nSelect 'Install App' or 'Add to Home Screen' from your browser menu.";
+        
+        if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+            message = "To install on your iPhone/iPad:\n\nTap the Share button at the bottom of Safari, then select 'Add to Home Screen'.";
+        } else if (/android/i.test(userAgent)) {
+            message = "To install on Android:\n\nTap the browser menu (⋮), then select 'Install App' or 'Add to Home Screen'.";
+        } else if (/Macintosh|Mac OS X/.test(userAgent)) {
+            message = "To install on your Mac:\n\nClick the install icon in the Safari/Chrome address bar, or select 'Install App' from the browser menu.";
+        } else if (/Windows/.test(userAgent)) {
+            message = "To install on Windows:\n\nClick the install icon in the Chrome/Edge address bar, or select 'Install App' from the browser menu.";
+        }
+
+        if (typeof window.showAlert === 'function') {
+            window.showAlert("Install App", message);
+        } else {
+            alert(message);
+        }
+    }
+};
+
+if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then(reg => {
+            console.log('[PWA] Service worker registered.', reg.scope);
+        }).catch(err => {
+            console.log('[PWA] Service worker registration failed:', err);
+        });
+    });
+}

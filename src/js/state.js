@@ -7,6 +7,7 @@ window.state = {
     mathEnabled: true,
     currentViewMode: 'raw',
     currentViewType: 'md',
+    rawTextMode: false,
     currentImageIndex: null,
     splitRatio: 50,
     pendingFiles: [],

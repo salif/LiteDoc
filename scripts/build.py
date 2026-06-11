@@ -14,7 +14,7 @@ from pathlib import Path
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -24,6 +24,9 @@ DIST_DIR = PROJECT_ROOT / "dist"
 OUT_FILE = DIST_DIR / "index.html"
 CACHE_DIR = PROJECT_ROOT / ".build_cache"
 
+# If your files exist with these names they'll be used in this order.
+# Anything in src/css/ or src/js/ NOT in these lists gets appended automatically,
+# so you never silently lose a file just because it's not listed here.
 CSS_PREFERRED_ORDER = ["css/main.css", "css/addons.css", "css/mobile.css"]
 JS_PREFERRED_ORDER  = [
     "js/utils.js", "js/state.js", "js/terminal.js", "js/ui.js",
@@ -31,10 +34,10 @@ JS_PREFERRED_ORDER  = [
     "js/pdf-parser.js",
     "js/ocr.js", "js/file-tree.js", "js/dropzone.js", "js/reset-utils.js",
     "js/downloads.js", "js/mobile-ux.js", "js/addons.js", "js/demo.js",
-    "js/main.js",  
+    "js/main.js",  # must stay last
 ]
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# Logging
 
 OK   = "\033[92m✔\033[0m"
 WARN = "\033[93m⚠\033[0m"
@@ -43,7 +46,7 @@ INFO = "\033[94m•\033[0m"
 
 def log(sym, msg): print(f"  {sym}  {msg}")
 
-# ── File helpers ──────────────────────────────────────────────────────────────
+# File helpers
 
 def read(path: Path) -> str:
     if not path.exists():
@@ -69,7 +72,7 @@ def fetch_url(url: str) -> str:
         log(ERR, f"download failed {url}: {e}")
         return ""
 
-# ── File discovery ────────────────────────────────────────────────────────────
+# File discovery
 
 def resolve_file_order(src: Path, preferred: list[str], glob: str, exclude: list[str] = None) -> list[str]:
     """
@@ -109,7 +112,7 @@ def resolve_file_order(src: Path, preferred: list[str], glob: str, exclude: list
 
     return result
 
-# ── Bundlers ──────────────────────────────────────────────────────────────────
+# Bundlers
 
 def safe_js(content: str) -> str:
     # </script> anywhere inside a <script> block ends it — browser doesn't care about context
@@ -141,7 +144,7 @@ def bundle_js(src: Path, files: list[str]) -> str:
             parts.append(wrapped)
     return "\n".join(parts)
 
-# ── HTML inlining ─────────────────────────────────────────────────────────────
+# HTML inlining
 
 def inline_into_html(html: str, css_blob: str, js_blob: str) -> str:
     # Strip local <link> tags
@@ -196,7 +199,7 @@ def inline_into_html(html: str, css_blob: str, js_blob: str) -> str:
 
     return html
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 def build():
     print("\n╔══════════════════════════════════════╗")
@@ -208,7 +211,7 @@ def build():
 
     DIST_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── Discover files ────────────────────────────────────────────────────────
+    # Discover files
     print("── Discovering files ────────────────────")
     css_files = resolve_file_order(SRC_DIR, CSS_PREFERRED_ORDER, "css/*.css")
     js_files  = resolve_file_order(SRC_DIR, JS_PREFERRED_ORDER,  "js/*.js", exclude=["js/benchmark.js"])
@@ -220,17 +223,17 @@ def build():
         log(ERR, "No CSS or JS files found in src/css/ or src/js/ — nothing to bundle")
         sys.exit(1)
 
-    # ── Bundle CSS ────────────────────────────────────────────────────────────
+    # Bundle CSS
     print("── CSS ──────────────────────────────────")
     css_blob = bundle_css(SRC_DIR, css_files)
     print()
 
-    # ── Bundle JS ─────────────────────────────────────────────────────────────
+    # Bundle JS
     print("── JavaScript ───────────────────────────")
     js_blob = bundle_js(SRC_DIR, js_files)
     print()
 
-    # ── Heavy CDN assets ──────────────────────────────────────────────────────
+    # Heavy CDN assets
     print("── CDN assets ───────────────────────────")
 
     # PDF.js worker — patch any pdf.worker URL found in the JS source
@@ -254,26 +257,36 @@ def build():
 
     print()
 
-    # ── HTML ──────────────────────────────────────────────────────────────────
+    # HTML
     print("── HTML ─────────────────────────────────")
     html = read(SRC_DIR / "index.html")
     if not html:
         log(ERR, "src/index.html missing"); sys.exit(1)
     print()
 
-    # ── Inlining ──────────────────────────────────────────────────────────────
+    # Inlining
     print("── Inlining ─────────────────────────────")
     output = inline_into_html(html, css_blob, js_blob)
     print()
 
-    # ── Write ─────────────────────────────────────────────────────────────────
+    # Write
     OUT_FILE.write_text(output, encoding="utf-8")
     kb = OUT_FILE.stat().st_size / 1024
     print("── Done ─────────────────────────────────")
     log(OK, f"output: {OUT_FILE.name}")
     log(OK, f"size:   {kb:,.1f} KB")
     
-    # ── Bundle benchmark.html ───────────────────────────────────────────────
+    # PWA Support
+    manifest_src = SRC_DIR / "manifest.json"
+    sw_src = SRC_DIR / "sw.js"
+    if manifest_src.exists():
+        (DIST_DIR / "manifest.json").write_text(manifest_src.read_text(encoding="utf-8"), encoding="utf-8")
+        log(OK, "copied: manifest.json")
+    if sw_src.exists():
+        (DIST_DIR / "sw.js").write_text(sw_src.read_text(encoding="utf-8"), encoding="utf-8")
+        log(OK, "copied: sw.js")
+
+    # Bundle benchmark.html
     BENCH_SRC = SRC_DIR / "benchmark.html"
     if BENCH_SRC.exists():
         print(f"\n── Bundling {BENCH_SRC.name} ──")

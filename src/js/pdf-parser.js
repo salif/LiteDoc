@@ -24,7 +24,7 @@ function cleanMarkdown(md) {
 function segmentBox(boxItems, pageW, pageH) {
     if (!boxItems || boxItems.length === 0) return [];
 
-    // ── Phase 1: Detect vertical gutters ────────────────────────────────
+    // Phase 1: Detect vertical gutters
     function findGutters(items) {
         if (items.length < 5) return [];
         // Sort items into rough horizontal lines
@@ -75,7 +75,7 @@ function segmentBox(boxItems, pageW, pageH) {
         return gutters;
     }
 
-    // ── Phase 2: Group items into text lines (within-column grouping) ───
+    // Phase 2: Group items into text lines (within-column grouping)
     function groupToLines(items) {
         items.sort((a, b) => b.y - a.y || a.x - b.x);
         const lines = [];
@@ -106,7 +106,7 @@ function segmentBox(boxItems, pageW, pageH) {
         return lines;
     }
 
-    // ── Phase 3: Merge consecutive lines into paragraph blocks ──────────
+    // Phase 3: Merge consecutive lines into paragraph blocks
     function mergeLinesToParagraphs(lines) {
         if (lines.length === 0) return [];
         // Sort top-to-bottom (descending y in PDF coords)
@@ -134,7 +134,7 @@ function segmentBox(boxItems, pageW, pageH) {
         return paragraphs;
     }
 
-    // ── Recursive helper: split a set of column items into ordered paragraphs ──
+    // Recursive helper: split a set of column items into ordered paragraphs
     function splitIntoParagraphs(colItems, colXMin, colXMax, depth) {
         if (colItems.length === 0) return [];
         if (depth > 2) {
@@ -205,7 +205,7 @@ function segmentBox(boxItems, pageW, pageH) {
 
     const gutters = findGutters(boxItems);
 
-    // ── Single column (no gutters) ───────────────────────────────────────
+    // Single column (no gutters)
     if (gutters.length === 0) {
         const lines = groupToLines(boxItems);
         const paras = mergeLinesToParagraphs(lines);
@@ -217,7 +217,7 @@ function segmentBox(boxItems, pageW, pageH) {
         }));
     }
 
-    // ── Multi-column: assign items to columns using primary gutter ───────
+    // Multi-column: assign items to columns using primary gutter
     const primaryGutter = gutters[0].x;
 
     const wideItems = [];
@@ -708,7 +708,17 @@ function groupItemsIntoLines(itemList) {
                         remainingItems.push(item);
                     }
 
-                    const textBlocks = segmentBox(remainingItems, pageW, pageH);
+                    let textBlocks;
+                    if (window.state && window.state.rawTextMode) {
+                        // Raw text dump mode: bypass segmentBox DLA and just treat page as single column
+                        textBlocks = [{
+                            type: 'text',
+                            bbox: { xMin: 0, xMax: pageW, yMin: 0, yMax: pageH },
+                            items: remainingItems
+                        }];
+                    } else {
+                        textBlocks = segmentBox(remainingItems, pageW, pageH);
+                    }
 
                     const allRegions = [...textBlocks];
                     for (const r of regions) {
@@ -1011,6 +1021,10 @@ function groupItemsIntoLines(itemList) {
 
                     // to md — Smart paragraph merging, hyphen unwrapping, blockquote & heading detection
                     function linesToMd(lines) {
+                        if (window.state && window.state.rawTextMode) {
+                            return lines.map(lg => lg.items.map(it => it.str).join('').trim()).filter(t => t.length > 0);
+                        }
+
                         const mdArr = [];
                         let prevY = null;
                         let paragraphBuf = '';

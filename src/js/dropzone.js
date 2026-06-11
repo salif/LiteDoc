@@ -244,16 +244,34 @@ async function handleFilesSelected(files, originalCount = 0) {
     }
 }
 
+let dragCounter = 0;
 if (dropZone) {
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-active'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
+    dropZone.addEventListener('dragenter', e => {
+        e.preventDefault();
+        dragCounter++;
+        dropZone.classList.add('drag-active');
+    });
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+    });
+    dropZone.addEventListener('dragleave', () => {
+        dragCounter--;
+        if (dragCounter === 0) {
+            dropZone.classList.remove('drag-active');
+        }
+    });
     dropZone.addEventListener('drop', e => {
         e.preventDefault();
+        dragCounter = 0;
         dropZone.classList.remove('drag-active');
         const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
         handleFilesSelected(files, e.dataTransfer.files.length);
     });
-    dropZone.addEventListener('click', () => { fileInput.click(); });
+    dropZone.addEventListener('click', (e) => { 
+        if (e.target.id !== 'file-input') {
+            fileInput.click(); 
+        }
+    });
 }
 
 if (fileInput) {
