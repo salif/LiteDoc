@@ -17,28 +17,28 @@
 
 **Full Main UI with Files Loaded**
 <p align="center">
-  <img alt="Full Main UI" src="https://github.com/user-attachments/assets/c7efadbc-84c5-4ec1-a586-b54a38852581" width="100%" />
+  <img alt="Full Main UI" src="https://github.com/user-attachments/assets/e47528eb-63cc-4af1-9baf-253e8c5ce4f0" width="100%" />
 </p>
 
 <table>
   <tr>
     <td width="50%" valign="top">
       <b>📝 Editor View</b><br>
-      <img alt="Editor View" src="https://github.com/user-attachments/assets/7951682e-8681-446b-a265-5f25500c412a" width="100%" />
+      <img alt="Editor View" src="https://github.com/user-attachments/assets/e3406f44-05d3-49ee-9b51-7ff547596ea1" width="100%" />
     </td>
     <td width="50%" valign="top">
       <b>📂 Explorer View</b><br>
-      <img alt="Explorer View" src="https://github.com/user-attachments/assets/a2f79d42-588e-48aa-a85c-3c83d30c5275" width="100%" />
+      <img alt="Explorer View" src="https://github.com/user-attachments/assets/860b196d-36b6-4462-90fa-dc8bd46ed811" width="100%" />
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <b>⏳ Loading Process</b><br>
-      <img alt="Loading Process" src="https://github.com/user-attachments/assets/60141156-5c43-46bb-bab9-10323501af60" width="100%" />
+      <img alt="Loading Process" src="https://github.com/user-attachments/assets/246b4a2d-0786-4996-a076-9d9f6fd8dee0" width="100%" />
     </td>
     <td width="50%" valign="top" align="center">
       <b>⚙️ Settings</b><br>
-      <img alt="Settings View" src="https://github.com/user-attachments/assets/a8446842-49f8-41c6-a189-38ea42e90a9c" width="45%" />
+      <img alt="Settings View" src="https://github.com/user-attachments/assets/88ac3a21-0620-4ebc-a3c3-ebd2eca8ce72" />
     </td>
   </tr>
 </table>
@@ -63,21 +63,34 @@ No dependencies, no server uploads, no privacy concerns. It runs entirely on you
 
 ## ✨ Key Features
 
-- **🔒 100% Local & Private:** Unpacks, parses, and converts PDFs entirely in the browser via `pdf.js`.
-- **🖼️ Built-in OCR:** Automatically runs WebAssembly-based Tesseract.js on textless, scanned pages.
-- **📊 Tables & Vectors:** Detects column structures, reconstructs tables, and extracts vector-drawn charts as standalone images.
-- **🧮 Math & Academic Support:** Extracts LaTeX math regions and renders them beautifully via KaTeX.
-- **🌍 Arabic & RTL:** Auto-detects and properly formats right-to-left languages with proper font fallbacks.
-- **🛡️ Password Support:** Safely prompts for passwords to unlock protected documents locally.
-- **🧹 Corrupted Font Handling:** Detects custom-encoded "garbage" fonts and offers smart fallbacks, including rendering unreadable pages as high-quality images.
+- **🔒 100% Local & Private:** Core extraction, OCR, and bundling run entirely on your local CPU/GPU inside the browser. Files never touch any server.
+- **🧩 Document Layout Analysis (DLA):** Employs a recursive **XY-Cut algorithm** to map out and isolate sidebars, headers, and multi-column flows, preventing horizontal text mixing.
+- **🖼️ Smart OCR & OSD Router:** Runs a lightweight 400x400px pre-pass to auto-detect script direction and language, dynamically initializing WebAssembly Tesseract.js workers.
+- **📊 Table & Vector Figures:** Detects vector lines to construct pristine GitHub-Flavored Markdown tables (supporting complex merged cells) and crops diagrams/charts as JPEG assets.
+- **🧮 LaTeX Math Equations:** Automatically detects math formula bounding boxes and renders them with KaTeX.
+- **🌍 Arabic & RTL Formatting:** Native support for Right-to-Left scripts with automatic line alignment and typography routing.
+- **🛡️ Local Decryption:** Handles password-protected PDFs securely by prompt-unlocking them locally in the browser sandbox.
+- **🧹 Custom Font Fallbacks:** Intercepts corrupted, custom-encoded "garbage" fonts, offering image-fallback options to ensure the document remains readable.
+- **⚡ Batch Queuing & Memory Protection:** Processes large files in 10-page chunks and releases web canvas assets dynamically to prevent Out-Of-Memory (OOM) browser crashes.
+- **📱 Fully Mobile Responsive:** Overhauled layout designed to offer full-editor features, document navigation, and settings toggles on mobile screens.
+- **⏸️ Queue & Formatting Control:** Pause or skip processing tasks on demand, or use the "Unformat" action to strip markdown styling instantly.
 
 ## 🚀 Getting Started
 
-Because LiteDoc is a purely client-side web application, installation takes seconds.
+Because LiteDoc is a purely client-side web application, you can run the pre-built version instantly:
 
 1. Clone or download this repository.
-2. Open `index.html` in any modern web browser (Chrome, Edge, Firefox, Safari).
+2. Open `dist/index.html` in any modern web browser (Chrome, Edge, Firefox, Safari).
 3. Drag and drop your PDFs!
+
+### Development & Custom Builds
+If you want to modify the source code:
+1. Make changes inside the `src/` directory (includes modular CSS and JS).
+2. Bundle your changes into a single self-contained file by running:
+   ```bash
+   python scripts/build.py
+   ```
+3. The compiled production bundle will be updated at `dist/index.html`.
 
 ### Extracting Files
 Once processing finishes, you can preview the generated Markdown directly in the built-in Ace Editor. 
