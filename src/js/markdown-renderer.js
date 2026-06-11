@@ -270,8 +270,16 @@ function _buildHtml(mdText, inlineRenders = {}) {
         // basic lists
         if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
             out += `<ul style="margin:12px 0 12px 24px;list-style-type:disc;line-height:1.6;color:var(--text-1)">`;
-            while (i < lines.length && /^[\*\-]\s+/.test(lines[i].trim())) {
-                const match = lines[i].trim().match(/^[\*\-]\s+(.+)$/);
+            while (i < lines.length) {
+                let currentTrimmed = lines[i].trim();
+                if (currentTrimmed === "") {
+                    // skip blank lines inside list
+                    i++;
+                    continue;
+                }
+                if (!/^[\*\-]\s+/.test(currentTrimmed)) break;
+                
+                const match = currentTrimmed.match(/^[\*\-]\s+(.+)$/);
                 if (match) {
                     let liContent = match[1];
                     let isTask = false;
@@ -287,10 +295,22 @@ function _buildHtml(mdText, inlineRenders = {}) {
 
         // ordered lists
         if (/^\d+\.\s+/.test(trimmed)) {
-            out += `<ol style="margin:12px 0 12px 24px;list-style-type:decimal;line-height:1.6;color:var(--text-1)">`;
-            while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-                const match = lines[i].trim().match(/^\d+\.\s+(.+)$/);
-                if (match) out += `<li style="margin-bottom:6px">${_inline(match[1])}</li>`;
+            // determine starting number
+            const startMatch = trimmed.match(/^(\d+)\./);
+            const startNum = startMatch ? parseInt(startMatch[1], 10) : 1;
+            
+            out += `<ol start="${startNum}" style="margin:12px 0 12px 24px;list-style-type:decimal;line-height:1.6;color:var(--text-1)">`;
+            while (i < lines.length) {
+                let currentTrimmed = lines[i].trim();
+                if (currentTrimmed === "") {
+                    // skip blank lines inside list
+                    i++;
+                    continue;
+                }
+                if (!/^\d+\.\s+/.test(currentTrimmed)) break;
+                
+                const match = currentTrimmed.match(/^\d+\.\s+(.+)$/);
+                if (match) out += `<li style="margin-bottom:6px; display:list-item;">${_inline(match[1])}</li>`;
                 i++;
             }
             out += `</ol>`;

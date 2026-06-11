@@ -30,7 +30,8 @@ CACHE_DIR = PROJECT_ROOT / ".build_cache"
 CSS_PREFERRED_ORDER = ["css/main.css", "css/addons.css", "css/mobile.css"]
 JS_PREFERRED_ORDER  = [
     "js/utils.js", "js/state.js", "js/terminal.js", "js/ui.js",
-    "js/ui-controls.js", "js/markdown-renderer.js", "js/pdf-parser.js",
+    "js/ui-controls.js", "js/markdown-renderer.js", "js/geometry.js",
+    "js/pdf-parser.js",
     "js/ocr.js", "js/file-tree.js", "js/dropzone.js", "js/reset-utils.js",
     "js/downloads.js", "js/mobile-ux.js", "js/addons.js", "js/demo.js",
     "js/main.js",  # must stay last

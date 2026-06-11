@@ -143,7 +143,7 @@ function joinLineItems(items) {
 
         // Punctuation kerning is tighter. Lower the space threshold if the previous text ends with punctuation.
         const endsWithPunctuation = /[.,;:!?]/.test(prev.str.trim().slice(-1));
-        const spaceThreshold = (prev.height || 10) * (endsWithPunctuation ? 0.15 : 0.30);
+        const spaceThreshold = (prev.height || 10) * (endsWithPunctuation ? 0.08 : 0.18);
 
         // Subscript / Superscript / Drop-cap logic
         const isDropCap = prev.str.length === 1 && prev.height > (curr.height * 1.5) && gap < curr.height;
@@ -176,6 +176,9 @@ function detectColumnSplit(lines, pageWidth) {
         let rightCount = 0;
 
         for (const lg of lines) {
+            // Ignore spanning headers/footers/figures (>60% of page width)
+            if ((lg.xMax - lg.xMin) > pageWidth * 0.6) continue;
+
             if (x >= lg.xMin && x <= lg.xMax) {
                 intersections++;
             } else if (lg.xMax < x) {
