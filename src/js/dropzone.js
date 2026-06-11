@@ -244,19 +244,25 @@ async function handleFilesSelected(files, originalCount = 0) {
     }
 }
 
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-active'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
-dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-active');
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-    handleFilesSelected(files, e.dataTransfer.files.length);
-});
-fileInput.addEventListener('change', e => {
-    const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
-    handleFilesSelected(files, e.target.files.length);
-    e.target.value = ''; // Reset input to allow selecting the same file again
-});
+if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-active'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-active');
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+        handleFilesSelected(files, e.dataTransfer.files.length);
+    });
+    dropZone.addEventListener('click', () => { fileInput.click(); });
+}
+
+if (fileInput) {
+    fileInput.addEventListener('change', e => {
+        const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+        handleFilesSelected(files, e.target.files.length);
+        e.target.value = ''; // Reset input to allow selecting the same file again
+    });
+}
 
 // paste handler
 document.addEventListener('paste', e => {

@@ -68,25 +68,16 @@
             logger: loggerFn
         };
 
-        if (window.__LITEDOC_TESSERACT_WORKER_URI) {
-            options.workerPath = window.__LITEDOC_TESSERACT_WORKER_URI;
+        if (window.__TESS_WORKER_URI) {
+            options.workerPath = window.__TESS_WORKER_URI;
         }
-        if (window.__LITEDOC_TESSERACT_CORE_URI) {
-            options.corePath = window.__LITEDOC_TESSERACT_CORE_URI;
-        }
-
-        if (window.location.protocol === 'file:') {
-            return await window.Tesseract.createWorker(lang, oem, options);
+        if (window.__TESS_CORE_URI) {
+            options.corePath = window.__TESS_CORE_URI;
         }
 
-        try {
-            options.langPath = 'models';
-            return await window.Tesseract.createWorker(lang, oem, options);
-        } catch (e) {
-            console.warn(`[OCR] Local model for ${lang} not found. Falling back to CDN...`);
-            delete options.langPath;
-            return await window.Tesseract.createWorker(lang, oem, options);
-        }
+        // Tesseract.js 5+ handles CDN fallbacks internally if langPath is omitted.
+        // We only use langPath if a local models directory is explicitly expected.
+        return await window.Tesseract.createWorker(lang, oem, options);
     }
 
     async function getIdleWorker(lang) {
@@ -256,9 +247,10 @@
         }
     }
 
+    let isPumping = false;
     async function pumpQueue() {
-        if (queue.length === 0) {
-            if (!workerPool.some(w => w.isBusy)) {
+        if (isPumping || queue.length === 0) {
+            if (queue.length === 0 && !workerPool.some(w => w.isBusy)) {
                 isProcessing = false;
                 updateQueueUI();
                 await terminateAllWorkers();
@@ -266,66 +258,68 @@
             return;
         }
 
-        isProcessing = true;
-        const firstTask = queue[0];
+        isPumping = true;
+        try {
+            while (queue.length > 0) {
+                const firstTask = queue[0];
 
-        if (firstTask.lang === 'auto' || !firstTask.lang) {
-            firstTask.lang = 'detecting...';
-            try {
-                firstTask.resolvedLang = await detectLanguage(firstTask.imagePayload);
-            } catch (e) {
-                console.warn('[OCR] OSD Detection failed or decided to skip. Falling back to eng.', e);
-                firstTask.resolvedLang = 'eng';
-            }
-            firstTask.lang = firstTask.resolvedLang;
-        }
-
-        if (firstTask.lang === 'detecting...') return;
-
-        const w = await getIdleWorker(firstTask.lang);
-
-        if (w) {
-            const task = queue.shift();
-            w.isBusy = true;
-            w.activeTaskId = task.id;
-            activeTasksProgress.set(task.id, 0);
-            taskStartTimes.set(task.id, Date.now());
-            updateQueueUI();
-
-            (async () => {
-                try {
-                    const processedPayload = await preprocessImagePayload(task.imagePayload);
-                    
-                    const recognizeOptions = { user_defined_dpi: '300' };
-                    if (task.lang && task.lang.includes('ara')) {
-                        // Arabic performs much better with PSM 3 (fully automatic layout analysis) than standard OSD choices.
-                        recognizeOptions.tessedit_pageseg_mode = '3';
+                if (firstTask.lang === 'auto' || !firstTask.lang) {
+                    firstTask.lang = 'detecting...';
+                    try {
+                        firstTask.resolvedLang = await detectLanguage(firstTask.imagePayload);
+                    } catch (e) {
+                        console.warn('[OCR] OSD Detection failed or decided to skip. Falling back to eng.', e);
+                        firstTask.resolvedLang = 'eng';
                     }
-
-                    // Tesseract default fallback (70 DPI) yields poor OCR. Setting to 300 matches typical print scans.
-                    const { data } = await w.worker.recognize(processedPayload, recognizeOptions);
-                    completedTasks++;
-                    w.pagesProcessed++;
-                    task.resolve((data && data.text) || '');
-                } catch (e) {
-                    console.error('Background OCR Failed', e);
-                    completedTasks++;
-                    task.reject(e);
-                } finally {
-                    const duration = Date.now() - taskStartTimes.get(task.id);
-                    taskDurations.push(duration);
-                    if (taskDurations.length > 20) taskDurations.shift();
-                    taskStartTimes.delete(task.id);
-                    
-                    w.isBusy = false;
-                    w.activeTaskId = null;
-                    activeTasksProgress.delete(task.id);
-                    updateQueueUI();
-                    pumpQueue();
+                    firstTask.lang = firstTask.resolvedLang;
                 }
-            })();
 
-            pumpQueue();
+                if (firstTask.lang === 'detecting...') break;
+
+                const w = await getIdleWorker(firstTask.lang);
+                if (!w) break; // No workers available right now
+
+                const task = queue.shift();
+                if (!task) break;
+
+                w.isBusy = true;
+                w.activeTaskId = task.id;
+                activeTasksProgress.set(task.id, 0);
+                taskStartTimes.set(task.id, Date.now());
+                isProcessing = true;
+                updateQueueUI();
+
+                (async () => {
+                    try {
+                        const processedPayload = await preprocessImagePayload(task.imagePayload);
+                        const recognizeOptions = { user_defined_dpi: '300' };
+                        if (task.lang && task.lang.includes('ara')) {
+                            recognizeOptions.tessedit_pageseg_mode = '3';
+                        }
+                        const { data } = await w.worker.recognize(processedPayload, recognizeOptions);
+                        completedTasks++;
+                        w.pagesProcessed++;
+                        task.resolve((data && data.text) || '');
+                    } catch (e) {
+                        console.error('Background OCR Failed', e);
+                        completedTasks++;
+                        task.reject(e);
+                    } finally {
+                        const duration = Date.now() - taskStartTimes.get(task.id);
+                        taskDurations.push(duration);
+                        if (taskDurations.length > 20) taskDurations.shift();
+                        taskStartTimes.delete(task.id);
+                        
+                        w.isBusy = false;
+                        w.activeTaskId = null;
+                        activeTasksProgress.delete(task.id);
+                        updateQueueUI();
+                        pumpQueue();
+                    }
+                })();
+            }
+        } finally {
+            isPumping = false;
         }
     }
 

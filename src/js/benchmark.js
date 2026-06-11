@@ -2,6 +2,11 @@
  * LiteDoc - Hardware Benchmarking Tool
  */
 
+// Initialize PDF.js Worker (build.py will patch this URL with a data URI)
+if (typeof pdfjsLib !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
 const benchmarkBtn = document.getElementById('run-benchmark-btn');
 if (benchmarkBtn) {
     benchmarkBtn.addEventListener('click', runBenchmark);

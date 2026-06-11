@@ -117,6 +117,19 @@ body {
     }
 }
 
+@media (max-width: 768px) {
+    @keyframes welcomeSlideUp {
+        from {
+            opacity: 0;
+            transform: translateY(15px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
 /* Brand Logo Animations */
 .brand-logo {
     transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);

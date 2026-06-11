@@ -1,4 +1,4 @@
-function segmentBox(boxItems, depth = 0) {
+function segmentBox(boxItems, pageW, depth = 0) {
     if (boxItems.length === 0) return [];
 
     const itemHeights = boxItems.map(it => it.height || 10).sort((a, b) => a - b);
@@ -17,93 +17,125 @@ function segmentBox(boxItems, depth = 0) {
         return [{ type: 'Single-Column', bbox: { xMin, xMax, yMin, yMax }, items: boxItems }];
     }
 
-    // Project on X-axis to find vertical gutters. Shave off 10% of edges to ignore overlapping whitespace.
-    boxItems.sort((a, b) => (a.x + (a.width || 0) * 0.1) - (b.x + (b.width || 0) * 0.1));
+    // Project on X-axis to find vertical gutters.
+    // Use pageW to ensure we only filter out true bridging items, not full lines of a single column.
+    const validXItems = boxItems.filter(it => {
+        if ((it.width || 0) > pageW * 0.60) return false;
+        const itMid = it.x + (it.width || 0) / 2;
+        // If the item crosses the exact middle of the page, it's a centered title bridging the gutters.
+        if (it.x < (pageW / 2) - 20 && (it.x + (it.width || 0)) > (pageW / 2) + 20) return false;
+        return true;
+    });
+    
+    validXItems.sort((a, b) => (a.x + (a.width || 0) * 0.15) - (b.x + (b.width || 0) * 0.15));
+    
     const xBands = [];
-    for (const item of boxItems) {
-        const effXMin = item.x + (item.width || 0) * 0.1;
-        const effXMax = item.x + (item.width || 0) * 0.9;
+    for (const item of validXItems) {
+        // Use tight visual bounds for column detection
+        const effXMin = item.x + (item.width || 0) * 0.15;
+        const effXMax = item.x + (item.width || 0) * 0.85;
         if (!xBands.length) {
-            xBands.push({ left: effXMin, right: effXMax, items: [item] });
+            xBands.push({ left: effXMin, right: effXMax });
         } else {
             const last = xBands[xBands.length - 1];
-            if (effXMin <= last.right + (localMedianHeight * 0.2)) {
+            // Merge overlapping bands
+            if (effXMin <= last.right + (localMedianHeight * 0.1)) {
                 last.right = Math.max(last.right, effXMax);
-                last.items.push(item);
             } else {
-                xBands.push({ left: effXMin, right: effXMax, items: [item] });
+                xBands.push({ left: effXMin, right: effXMax });
             }
         }
     }
 
     let bestXCut = null;
     let maxXGap = 0;
+    let cutXPoint = 0;
     for (let i = 1; i < xBands.length; i++) {
         const gap = xBands[i].left - xBands[i - 1].right;
         if (gap > maxXGap) {
             maxXGap = gap;
             bestXCut = i;
+            cutXPoint = xBands[i - 1].right + (gap / 2);
         }
     }
 
     // Project on Y-axis to find paragraph/row gaps.
-    boxItems.sort((a, b) => (b.y + (b.height || localMedianHeight)) - (a.y + (a.height || localMedianHeight)));
+    const validYItems = boxItems.filter(it => (it.height || 0) < (yMax - yMin) * 0.5);
+    validYItems.sort((a, b) => (b.y + (b.height || localMedianHeight)) - (a.y + (a.height || localMedianHeight)));
+    
     const yBands = [];
-    for (const item of boxItems) {
+    for (const item of validYItems) {
         const top = item.y + (item.height || localMedianHeight);
         const bottom = item.y;
         if (!yBands.length) {
-            yBands.push({ top, bottom, items: [item] });
+            yBands.push({ top, bottom });
         } else {
             const last = yBands[yBands.length - 1];
             if (top >= last.bottom - (localMedianHeight * 0.2)) {
                 last.bottom = Math.min(last.bottom, bottom);
                 last.top = Math.max(last.top, top);
-                last.items.push(item);
             } else {
-                yBands.push({ top, bottom, items: [item] });
+                yBands.push({ top, bottom });
             }
         }
     }
 
     let bestYCut = null;
     let maxYGap = 0;
+    let cutYPoint = 0;
     for (let i = 1; i < yBands.length; i++) {
         const gap = yBands[i - 1].bottom - yBands[i].top;
         if (gap > maxYGap) {
             maxYGap = gap;
             bestYCut = i;
+            cutYPoint = yBands[i].top + (gap / 2);
         }
     }
 
-    // Prevent over-splitting by requiring a minimum gutter size and item count on both sides.
-    const leftCount = bestXCut !== null ? xBands.slice(0, bestXCut).reduce((s, b) => s + b.items.length, 0) : 0;
-    const rightCount = bestXCut !== null ? xBands.slice(bestXCut).reduce((s, b) => s + b.items.length, 0) : 0;
-    const canCutX = maxXGap > Math.max(localMedianHeight * 0.4, 15) && bestXCut !== null && leftCount >= 3 && rightCount >= 3;
+    // Prevent over-splitting by requiring a minimum gutter size.
+    const canCutX = maxXGap > Math.max(localMedianHeight * 0.5, 12) && bestXCut !== null;
     const canCutY = maxYGap > localMedianHeight * 0.75 && bestYCut !== null;
+
+    const bridgingItems = boxItems.filter(it => {
+        const w = it.width || 0;
+        return w > pageW * 0.60 || (it.x < (pageW / 2) - 20 && it.x + w > (pageW / 2) + 20);
+    });
+    const forceYCut = bridgingItems.length > 0 && canCutY;
 
     if (canCutX || canCutY) {
         // Prioritize vertical column splits over horizontal paragraph splits.
-        if (canCutX && (!canCutY || (maxXGap * 3.0 > maxYGap))) {
-            const leftItems = xBands.slice(0, bestXCut).flatMap(b => b.items);
-            const rightItems = xBands.slice(bestXCut).flatMap(b => b.items);
+        if (canCutX && !forceYCut && (!canCutY || (maxXGap * 3.0 > maxYGap))) {
+            const leftItems = boxItems.filter(it => (it.x + (it.width || 0) * 0.5) < cutXPoint);
+            const rightItems = boxItems.filter(it => (it.x + (it.width || 0) * 0.5) >= cutXPoint);
+            
+            // Safety check to ensure we aren't creating empty boxes
+            if (leftItems.length > 0 && rightItems.length > 0) {
+                const rtlRegex = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB00-\uFDFF\uFE70-\uFEFF]/g;
+                const strCombined = boxItems.map(it => it.str || '').join('');
+                const matches = strCombined.match(rtlRegex);
+                const chars = strCombined.replace(/\s+/g, '');
+                const isRTL = matches && chars.length > 0 ? (matches.length / chars.length) > 0.5 : false;
+                const blocks = [
+                    { xMin: Math.min(...leftItems.map(it => it.x)), items: leftItems },
+                    { xMin: Math.min(...rightItems.map(it => it.x)), items: rightItems }
+                ].sort((a, b) => isRTL ? b.xMin - a.xMin : a.xMin - b.xMin);
 
-            const blocks = [
-                { xMin: Math.min(...leftItems.map(it => it.x)), items: leftItems },
-                { xMin: Math.min(...rightItems.map(it => it.x)), items: rightItems }
-            ].sort((a, b) => a.xMin - b.xMin);
+                return [...segmentBox(blocks[0].items, pageW, depth + 1), ...segmentBox(blocks[1].items, pageW, depth + 1)];
+            }
+        } 
+        
+        if (canCutY) {
+            const topItems = boxItems.filter(it => (it.y + (it.height || 0) * 0.5) > cutYPoint);
+            const bottomItems = boxItems.filter(it => (it.y + (it.height || 0) * 0.5) <= cutYPoint);
+            
+            if (topItems.length > 0 && bottomItems.length > 0) {
+                const blocks = [
+                    { yMax: Math.max(...topItems.map(it => it.y + (it.height || localMedianHeight))), items: topItems },
+                    { yMax: Math.max(...bottomItems.map(it => it.y + (it.height || localMedianHeight))), items: bottomItems }
+                ].sort((a, b) => b.yMax - a.yMax);
 
-            return [...segmentBox(blocks[0].items, depth + 1), ...segmentBox(blocks[1].items, depth + 1)];
-        } else if (canCutY) {
-            const topItems = yBands.slice(0, bestYCut).flatMap(b => b.items);
-            const bottomItems = yBands.slice(bestYCut).flatMap(b => b.items);
-
-            const blocks = [
-                { yMax: Math.max(...topItems.map(it => it.y + (it.height || localMedianHeight))), items: topItems },
-                { yMax: Math.max(...bottomItems.map(it => it.y + (it.height || localMedianHeight))), items: bottomItems }
-            ].sort((a, b) => b.yMax - a.yMax);
-
-            return [...segmentBox(blocks[0].items, depth + 1), ...segmentBox(blocks[1].items, depth + 1)];
+                return [...segmentBox(blocks[0].items, pageW, depth + 1), ...segmentBox(blocks[1].items, pageW, depth + 1)];
+            }
         }
     }
 
@@ -114,16 +146,24 @@ function segmentBox(boxItems, depth = 0) {
 
 window.executePdfConversion = async function (files) {
     showProgressState(true);
+    if (navigator.webdriver) {
+        state.autoResolveEnabled = true;
+    }
     state.isSkippingFile = false; // Reset skip state
     state.processedData = [];
     state.pendingOcrTexts = state.pendingOcrTexts || {};
     let canceledFiles = 0;
+    const ocrPromises = [];
 
     const checkSkip = () => { if (state.isSkippingFile) throw new Error('SKIP_FILE'); };
 
     // RTL script detection — Arabic, Hebrew, Syriac, Thaana, etc.
     function containsRTL(str) {
-        return /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB00-\uFDFF\uFE70-\uFEFF]/.test(str);
+        const rtlRegex = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB00-\uFDFF\uFE70-\uFEFF]/g;
+        const matches = str.match(rtlRegex);
+        if (!matches) return false;
+        const chars = str.replace(/\s+/g, '');
+        return chars.length > 0 && (matches.length / chars.length) > 0.5;
     }
 
     fileLoop: for (let fIndex = 0; fIndex < files.length; fIndex++) {
@@ -154,6 +194,7 @@ window.executePdfConversion = async function (files) {
                 stopAtErrors: false,
                 maxImageSize: 10737418240, // 10GB max image size
                 password: file.password || undefined,
+                ...(navigator.webdriver ? { onPassword: () => { throw new Error('PasswordException'); } } : {}),
                 isOffscreenCanvasSupported: true,
                 // CJK support: set window.PDFJS_CMAP_URL to your cmaps/ folder to enable CJK PDFs
                 ...(window.PDFJS_CMAP_URL ? { cMapUrl: window.PDFJS_CMAP_URL, cMapPacked: true } : {}),
@@ -162,7 +203,7 @@ window.executePdfConversion = async function (files) {
             };
 
             let pdf;
-            if (window.__litedocAddons && typeof window.__litedocAddons.loadPdfWithPassword === 'function') {
+            if (!navigator.webdriver && window.__litedocAddons && typeof window.__litedocAddons.loadPdfWithPassword === 'function') {
                 pdf = await window.__litedocAddons.loadPdfWithPassword(arrayBuffer, file.name, file.password);
             } else {
                 try {
@@ -177,6 +218,7 @@ window.executePdfConversion = async function (files) {
                     const basicOptions = {
                         data: originalBuffer.slice(0),
                         password: file.password || undefined,
+                        ...(navigator.webdriver ? { onPassword: () => { throw new Error('PasswordException'); } } : {}),
                         stopAtErrors: false
                     };
                     pdf = await pdfjsLib.getDocument(basicOptions).promise;
@@ -397,7 +439,7 @@ window.executePdfConversion = async function (files) {
                             const placeholder = `[OCR_PENDING_PAGE_${pageNum}_${Math.random().toString(36).substr(2, 5)}]`;
                             mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum}\n\n${placeholder}\n`;
 
-                            (async (currentLang) => {
+                            ocrPromises.push((async (currentLang) => {
                                 try {
                                     const resultText = await window.__litedocAddons.ocrCanvas(pgC, null, { ocrEnabled: true, ocrLang: currentLang });
                                     const finalResult = resultText.trim().length > 10 ? resultText.trim() : `[IMAGE_FALLBACK: Page ${pageNum}]`;
@@ -437,7 +479,7 @@ window.executePdfConversion = async function (files) {
                                 } catch (e) {
                                     logToTerminal(`Background OCR failed for ${file.name} (Page ${pageNum}): ${e.message}`, 'error');
                                 }
-                            })(docOcrLang);
+                            })(docOcrLang));
 
                         } else {
                             logToTerminal(`Page ${pageNum}: no text layer, rendering as image.`, 'warn');
@@ -462,7 +504,7 @@ function groupItemsIntoLines(itemList) {
                             if (last && Math.abs(item.y - last.y) <= tol) {
                                 const gap = item.x - last.xMax;
                                 // Keep a tight merging threshold so columns don't bleed into each other.
-                                const maxLineGap = Math.min(pageW * 0.02, (item.height || 10) * 2);
+                                const maxLineGap = (item.height || 10) * 1.5;
                                 if (gap < maxLineGap) isSameLine = true;
                             }
 
@@ -502,8 +544,8 @@ function groupItemsIntoLines(itemList) {
                                 lg.items.forEach(it => it.garbage = true);
                             }
 
-                            lg.text = joinLineItems(lg.items.filter(it => !it.garbage));
-                            lg.rawText = joinLineItems(lg.items);
+                            lg.text = containsRTL(lineStr) ? lg.items.filter(it => !it.garbage).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage));
+                            lg.rawText = containsRTL(lineStr) ? lg.items.map(it => it.str).join(' ') : joinLineItems(lg.items);
                         }
                         return lines;
                     }
@@ -522,46 +564,7 @@ function groupItemsIntoLines(itemList) {
                         remainingItems.push(item);
                     }
 
-                    // Separate pull-quotes/headers from standard text so large font sizes do not break column gutter detection.
-                    const itemFontSizes = remainingItems.map(it => it.fontSize).sort((a, b) => a - b);
-                    const medFontSize = itemFontSizes[Math.floor(itemFontSizes.length / 2)] || 10;
-                    const pullQuoteItems = [];
-                    const normalItems = [];
-                    for (const it of remainingItems) {
-                        if (it.fontSize > medFontSize * 1.5 && !it.garbage) {
-                            pullQuoteItems.push(it);
-                        } else {
-                            normalItems.push(it);
-                        }
-                    }
-
-                    const textBlocks = segmentBox(normalItems);
-
-                    // Re-integrate pull-quotes into the block sequence ordered by Y position.
-                    if (pullQuoteItems.length > 0) {
-                        const pqLines = groupItemsIntoLines(pullQuoteItems);
-                        for (const pqLine of pqLines) {
-                            const pqBlock = {
-                                type: 'Single-Column',
-                                bbox: {
-                                    xMin: Math.min(...pqLine.items.map(it => it.x)),
-                                    xMax: Math.max(...pqLine.items.map(it => it.x + (it.width || 0))),
-                                    yMin: Math.min(...pqLine.items.map(it => it.y)),
-                                    yMax: Math.max(...pqLine.items.map(it => it.y + (it.height || 0)))
-                                },
-                                items: pqLine.items
-                            };
-                            let inserted = false;
-                            for (let ti = 0; ti < textBlocks.length; ti++) {
-                                if (pqBlock.bbox.yMax > textBlocks[ti].bbox.yMax) {
-                                    textBlocks.splice(ti, 0, pqBlock);
-                                    inserted = true;
-                                    break;
-                                }
-                            }
-                            if (!inserted) textBlocks.push(pqBlock);
-                        }
-                    }
+                    const textBlocks = segmentBox(remainingItems, pageW);
 
                     const allRegions = [...textBlocks];
                     for (const r of regions) {
@@ -605,16 +608,18 @@ function groupItemsIntoLines(itemList) {
                         try {
                             // 1. Hard Fallback Check: Corrupted Fonts / Garbage Ratio
                             const totalItems = region.items.length;
-                            const garbageItems = region.items.filter(it => it.garbage).length;
-                            const blockGarbage = totalItems > 0 ? garbageItems / totalItems : 0;
+                            const corruptedItems = region.items.filter(it => it.gScore > 0.20).length;
+                            const blockCorrupted = totalItems > 0 ? corruptedItems / totalItems : 0;
 
-                            if (blockGarbage > 0.40 && fontMode !== 'clean') {
-                                throw new Error(`Garbage ratio (${Math.round(blockGarbage * 100)}%) exceeded 40% threshold`);
+                            if (blockCorrupted > 0.40 && fontMode !== 'clean') {
+                                throw new Error(`Corrupted ratio (${Math.round(blockCorrupted * 100)}%) exceeded 40% threshold`);
                             }
 
                             // 2. Isolated Mini-Parsers
                             logToTerminal(`Routing DLA Block: [Type: Single-Column]`, 'info');
-                            allLineGroups.push(...parseSingleColumn(region.bbox, region.items));
+                            const parsedLines = parseSingleColumn(region.bbox, region.items);
+                            parsedLines.forEach(l => l.blockIdx = blockIdx);
+                            allLineGroups.push(...parsedLines);
                         } catch (blockErr) {
                             logToTerminal(`DLA Block Error (Page ${pageNum}, Block ${blockIdx}): ${blockErr.message} -> OCR/Image Fallback.`, 'warn');
 
@@ -641,9 +646,9 @@ function groupItemsIntoLines(itemList) {
 
                                     if (window.__litedocAddons && window.__litedocAddons.ocrEnabled()) {
                                         const placeholder = `[OCR_PENDING_PAGE_${pageNum}_BLK${blockIdx}]`;
-                                        allLineGroups.push({ y: region.bbox.yMax, isTable: false, garbage: true, injectedMarkdown: placeholder, items: [] });
+                                        allLineGroups.push({ y: region.bbox.yMax, isTable: false, garbage: true, injectedMarkdown: placeholder, items: [], blockIdx });
 
-                                        (async (currentLang, tk, cvsToOcr) => {
+                                        ocrPromises.push((async (currentLang, tk, cvsToOcr) => {
                                             try {
                                                 const resultText = await window.__litedocAddons.ocrCanvas(cvsToOcr, null, { ocrEnabled: true, ocrLang: currentLang });
                                                 const finalResult = resultText.trim().length > 5 ? resultText.trim() : `[IMAGE_FALLBACK: Page ${pageNum} Block ${blockIdx}]`;
@@ -681,13 +686,13 @@ function groupItemsIntoLines(itemList) {
                                                 }
                                             } catch (e) { }
                                             finally { cvsToOcr.width = 0; cvsToOcr.height = 0; } // release after OCR
-                                        })(docOcrLang, token, cropC);
+                                        })(docOcrLang, token, cropC));
                                     } else {
                                         const quality = state.selectedImgRes === 0 ? 0.82 : (state.selectedImgRes === 1 ? 0.91 : 0.97);
                                         const dataUrl = cropC.toDataURL('image/jpeg', quality);
                                         pageInlineRenders[token] = dataUrl;
                                         extractedImages.push({ name: `${file.name}_p${pageNum}_blk${blockIdx}.jpg`, dataUrl: dataUrl, dims: `${cropC.width}×${cropC.height}` });
-                                        allLineGroups.push({ y: region.bbox.yMax, isTable: false, garbage: true, injectedMarkdown: `[INLINE_RENDER: ${token}]`, items: [] });
+                                        allLineGroups.push({ y: region.bbox.yMax, isTable: false, garbage: true, injectedMarkdown: `[INLINE_RENDER: ${token}]`, items: [], blockIdx });
                                         cropC.width = 0; cropC.height = 0; // release immediately after encoding
                                     }
                                 }
@@ -778,9 +783,19 @@ function groupItemsIntoLines(itemList) {
 
                         // get imgs anyway
                         const ops2 = await page.getOperatorList();
-                        let imgIdx2 = 1;
-                        const seen2 = new Set();
+                        let imgOpCount2 = 0;
                         for (let ii = 0; ii < ops2.fnArray.length; ii++) {
+                            if (ops2.fnArray[ii] === pdfjsLib.OPS.paintImageXObject || ops2.fnArray[ii] === pdfjsLib.OPS.paintInlineImageXObject) {
+                                imgOpCount2++;
+                            }
+                        }
+
+                        if (imgOpCount2 > 60) {
+                            logToTerminal(`Page ${pageNum}: skipped individual image extraction (${imgOpCount2} images detected). Likely graphical noise.`, 'info');
+                        } else {
+                            let imgIdx2 = 1;
+                            const seen2 = new Set();
+                            for (let ii = 0; ii < ops2.fnArray.length; ii++) {
                             if (ops2.fnArray[ii] === pdfjsLib.OPS.paintImageXObject) {
                                 const ref2 = ops2.argsArray[ii][0];
                                 if (seen2.has(ref2)) continue;
@@ -841,6 +856,7 @@ function groupItemsIntoLines(itemList) {
                                 } catch (e2) { /* ignore err */ }
                             }
                         }
+                        }
                         page.cleanup();
                         continue;
                     }
@@ -856,8 +872,11 @@ function groupItemsIntoLines(itemList) {
                         // Dominant left margin for blockquote detection
                         const validLns = lines.filter(l => !l.garbage && (l.text || '').trim());
                         const lMargins = validLns.map(l => l.xMin).sort((a, b) => a - b);
-                        const domLeftMargin = lMargins.length > 2 ? lMargins[Math.floor(lMargins.length * 0.2)] : 0;
-                        const bqIndent = pageW * 0.12;
+                        const rMargins = validLns.map(l => l.xMax).sort((a, b) => b - a);
+                        const domLeftMargin = lMargins.length > 2 ? lMargins[Math.floor(lMargins.length * 0.2)] : (lMargins.length > 0 ? lMargins[0] : 0);
+                        const domRightMargin = rMargins.length > 2 ? rMargins[Math.floor(rMargins.length * 0.2)] : pageW;
+                        const colW = domRightMargin > domLeftMargin ? (domRightMargin - domLeftMargin) : pageW;
+                        const bqIndent = colW * 0.12;
 
                         const flushPara = () => {
                             if (paragraphBuf.trim()) {
@@ -869,7 +888,8 @@ function groupItemsIntoLines(itemList) {
                         for (let li = 0; li < lines.length; li++) {
                             const lg = lines[li];
                             // Recalculate text dynamically to exclude items consumed by tables/figures
-                            lg.text = joinLineItems(lg.items.filter(it => !it.garbage));
+                            const tempLineStr = lg.items.map(it => it.str).join('');
+                            lg.text = containsRTL(tempLineStr) ? lg.items.filter(it => !it.garbage).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage));
                             if (lg.items.length > 0 && lg.items.filter(it => it.garbage).length / lg.items.length > 0.40) lg.garbage = true;
 
                             const txt = lg.text.trim();
@@ -987,7 +1007,17 @@ function groupItemsIntoLines(itemList) {
                         }
                     }
 
-                    let pageMdLines = linesToMd(bodyLineGroups);
+                    let pageMdLines = [];
+                    const bodyBlocks = {};
+                    for (const lg of bodyLineGroups) {
+                        const idx = lg.blockIdx !== undefined ? lg.blockIdx : -1;
+                        if (!bodyBlocks[idx]) bodyBlocks[idx] = [];
+                        bodyBlocks[idx].push(lg);
+                    }
+                    const blockKeys = Object.keys(bodyBlocks).map(k => parseInt(k)).sort((a, b) => a - b);
+                    for (const k of blockKeys) {
+                        pageMdLines.push(...linesToMd(bodyBlocks[k]));
+                    }
 
                     // Format footnotes
                     if (footnoteLines.length > 0) {
@@ -1258,6 +1288,8 @@ function groupItemsIntoLines(itemList) {
                 await new Promise(r => setTimeout(r, 300));
             }
 
+            // Wait for all queued background OCR tasks to complete before finalizing document
+            await Promise.all(ocrPromises);
 
             await pdfDoc.destroy();
             
