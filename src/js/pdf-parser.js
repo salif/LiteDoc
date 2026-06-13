@@ -21,272 +21,460 @@ function cleanMarkdown(md) {
     return cleaned.join('\n');
 }
 
-function segmentBox(boxItems, pageW, pageH) {
-    if (!boxItems || boxItems.length === 0) return [];
+function segmentBox(boxItems, pageW, pageH, depth = 0) {
+    if (boxItems.length === 0) return [];
 
-    // Phase 1: Detect vertical gutters
-    function findGutters(items) {
+    // ── Helper: find vertical gutters using line-gap voting ───────────
+    function findVerticalGutters(items) {
         if (items.length < 5) return [];
-        // Sort items into rough horizontal lines
-        const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
-        const lines = [];
-        for (const item of sorted) {
-            const last = lines[lines.length - 1];
-            const tol = Math.max(3, (item.height || 10) * 0.5);
-            if (last && Math.abs(item.y - last.y) <= tol) {
-                last.items.push(item);
-                last.xMin = Math.min(last.xMin, item.x);
-                last.xMax = Math.max(last.xMax, item.x + (item.width || 0));
-            } else {
-                lines.push({ y: item.y, xMin: item.x, xMax: item.x + (item.width || 0), items: [item] });
+        console.log(`[findVerticalGutters] items count: ${items.length}`);
+
+        const pageW_int = Math.ceil(pageW);
+        const projection = new Float32Array(pageW_int);
+        for (const item of items) {
+            const itemW = item.width || 0;
+            if (itemW > pageW * 0.50) continue; // Skip full-width headers/tables that destroy the gutter
+            const xStart = Math.max(0, Math.floor(item.x));
+            const xEnd = Math.min(pageW_int - 1, Math.ceil(item.x + itemW));
+            for (let x = xStart; x <= xEnd; x++) {
+                projection[x] += 1;
             }
         }
-        // Vote for gap positions
-        const votes = [];
-        for (const line of lines) {
-            const lineItems = [...line.items].sort((a, b) => a.x - b.x);
-            let maxRight = lineItems[0].x + (lineItems[0].width || 0);
-            for (let i = 1; i < lineItems.length; i++) {
-                const curr = lineItems[i];
-                const gap = curr.x - maxRight;
-                if (gap >= 12) {
-                    const leftWidth = maxRight - line.xMin;
-                    const rightWidth = line.xMax - curr.x;
-                    if (leftWidth > 15 && rightWidth > 15) {
-                        votes.push({ xStart: maxRight, xEnd: curr.x });
-                    }
-                }
-                maxRight = Math.max(maxRight, curr.x + (curr.width || 0));
-            }
+
+        let maxProj = 0;
+        for (let x = 0; x < pageW_int; x++) {
+            if (projection[x] > maxProj) maxProj = projection[x];
         }
-        if (votes.length === 0) return [];
-        // Score candidates
-        const candidates = [];
-        for (let x = pageW * 0.15; x <= pageW * 0.85; x += 3) {
-            let count = 0;
-            for (const v of votes) { if (x >= v.xStart && x <= v.xEnd) count++; }
-            if (count >= 4) candidates.push({ x, count });
-        }
-        candidates.sort((a, b) => b.count - a.count);
+        // Tolerate up to 25% noise (or 10 absolute items) crossing the gap (e.g. table rows, spanning headers)
+        const threshold = Math.max(10, Math.floor(maxProj * 0.25));
+
+        const MIN_GAP = 12;
         const gutters = [];
-        for (const c of candidates) {
-            if (!gutters.some(g => Math.abs(c.x - g.x) < 40)) gutters.push(c);
+        let gapStart = -1;
+        const searchStart = Math.floor(pageW * 0.15);
+        const searchEnd = Math.floor(pageW * 0.85);
+
+        for (let x = searchStart; x <= searchEnd; x++) {
+            if (projection[x] <= threshold) {
+                if (gapStart === -1) gapStart = x;
+            } else {
+                if (gapStart !== -1) {
+                    const gapWidth = x - gapStart;
+                    if (gapWidth >= MIN_GAP) {
+                        gutters.push({ x: gapStart + gapWidth / 2, count: gapWidth });
+                    }
+                    gapStart = -1;
+                }
+            }
         }
+        if (gapStart !== -1) {
+            const gapWidth = (searchEnd + 1) - gapStart;
+            if (gapWidth >= MIN_GAP) {
+                gutters.push({ x: gapStart + gapWidth / 2, count: gapWidth });
+            }
+        }
+
+        console.log(`[findVerticalGutters] maxProj=${maxProj}, threshold=${threshold}, gutters=${gutters.map(g => g.x).join(', ')}`);
+        gutters.sort((a, b) => b.count - a.count);
         return gutters;
     }
 
-    // Phase 2: Group items into text lines (within-column grouping)
-    function groupToLines(items) {
-        items.sort((a, b) => b.y - a.y || a.x - b.x);
+    // ── Helper: group items into lines within a single column ──────────
+    function groupIntoLines(items, tightGap = false) {
+        items.sort((a, b) => Math.abs(b.y - a.y) < 2 ? a.x - b.x : b.y - a.y);
         const lines = [];
         for (const item of items) {
             const last = lines[lines.length - 1];
-            const tol = Math.max(3, (item.height || 10) * 0.5);
-            let sameLine = false;
+            const tol = Math.max(3, (item.height || 10) * 0.45);
+            let isSameLine = false;
             if (last && Math.abs(item.y - last.y) <= tol) {
                 const gap = item.x - last.xMax;
-                if (gap < (item.height || 10) * 2.0) sameLine = true;
+                // Within a single column, word spacing is typically 0.2–0.6× font height
+                const maxLineGap = (item.height || 10) * (tightGap ? 0.90 : 1.2);
+                if (gap > -(item.height || 10) * 0.5 && gap < maxLineGap) isSameLine = true;
             }
-            if (sameLine) {
+            if (isSameLine) {
                 last.items.push(item);
                 last.xMax = Math.max(last.xMax, item.x + (item.width || 0));
                 last.xMin = Math.min(last.xMin, item.x);
                 last.yMin = Math.min(last.yMin, item.y);
                 last.yMax = Math.max(last.yMax, item.y + (item.height || 10));
-                last.height = Math.max(last.height || 0, item.height || 10);
+                last.height = Math.max(last.height, item.height || 10);
             } else {
                 lines.push({
                     items: [item],
-                    xMin: item.x, xMax: item.x + (item.width || 0),
-                    yMin: item.y, yMax: item.y + (item.height || 10),
-                    height: item.height || 10, y: item.y
+                    xMin: item.x,
+                    xMax: item.x + (item.width || 0),
+                    yMin: item.y,
+                    yMax: item.y + (item.height || 10),
+                    y: item.y,
+                    height: item.height || 10
                 });
             }
         }
         return lines;
     }
 
-    // Phase 3: Merge consecutive lines into paragraph blocks
-    function mergeLinesToParagraphs(lines) {
-        if (lines.length === 0) return [];
-        // Sort top-to-bottom (descending y in PDF coords)
-        lines.sort((a, b) => b.yMin - a.yMin);
-        const paragraphs = [];
+    // ── Helper: merge lines into blocks within a single column ────────
+    function mergeIntoBlocks(lines) {
+        lines.sort((a, b) => Math.abs(b.y - a.y) < 2 ? a.xMin - b.xMin : b.y - a.y);
+        const blocks = [];
         for (const line of lines) {
-            const last = paragraphs[paragraphs.length - 1];
-            const lineH = line.height || 10;
-            const maxSep = lineH * 2.2; // Allow up to ~2 line heights of gap before new paragraph
-            if (last && (last.yMin - line.yMax) < maxSep && (last.yMin - line.yMax) >= -5) {
-                // Merge into existing paragraph
-                last.items.push(...line.items);
-                last.xMin = Math.min(last.xMin, line.xMin);
-                last.xMax = Math.max(last.xMax, line.xMax);
-                last.yMax = Math.max(last.yMax, line.yMax);
-                last.yMin = Math.min(last.yMin, line.yMin);
-            } else {
-                paragraphs.push({
+            let assigned = false;
+            for (let i = blocks.length - 1; i >= 0; i--) {
+                const block = blocks[i];
+                const vertGap = block.yMin - line.yMax;
+                const yOverlap = Math.max(0, Math.min(block.yMax, line.yMax) - Math.max(block.yMin, line.yMin));
+                if (yOverlap > 0 || (vertGap >= -line.height * 0.5 && vertGap < line.height * 2.5)) {
+                    const horizOverlap = Math.max(0, Math.min(block.xMax, line.xMax) - Math.max(block.xMin, line.xMin));
+                    const minWidth = Math.min(block.xMax - block.xMin, line.xMax - line.xMin);
+                    if (horizOverlap > minWidth * 0.3 || (Math.abs(line.xMin - block.xMin) < 20 && Math.abs(line.xMax - block.xMax) < 20)) {
+                        block.lines.push(line);
+                        block.items.push(...line.items);
+                        block.xMin = Math.min(block.xMin, line.xMin);
+                        block.xMax = Math.max(block.xMax, line.xMax);
+                        block.yMin = Math.min(block.yMin, line.yMin);
+                        block.yMax = Math.max(block.yMax, line.yMax);
+                        assigned = true;
+                        break;
+                    }
+                }
+            }
+            if (!assigned) {
+                blocks.push({
+                    lines: [line],
                     items: [...line.items],
-                    xMin: line.xMin, xMax: line.xMax,
-                    yMin: line.yMin, yMax: line.yMax
+                    xMin: line.xMin,
+                    xMax: line.xMax,
+                    yMin: line.yMin,
+                    yMax: line.yMax
                 });
             }
         }
-        return paragraphs;
+        return blocks;
     }
 
-    // Recursive helper: split a set of column items into ordered paragraphs
-    function splitIntoParagraphs(colItems, colXMin, colXMax, depth) {
-        if (colItems.length === 0) return [];
-        if (depth > 2) {
-            // Max recursion: just group into lines and merge
-            const lines = groupToLines(colItems);
-            return mergeLinesToParagraphs(lines);
+    // ── Helper: process single-column layout ─────────────────────────
+    function processSingleColumn(items) {
+        const lines = groupIntoLines(items);
+        const blocks = mergeIntoBlocks(lines);
+        
+        const formattedBlocks = blocks.map(block => ({
+            type: 'Single-Column',
+            xMin: block.xMin,
+            xMax: block.xMax,
+            yMin: block.yMin,
+            yMax: block.yMax,
+            items: block.items
+        }));
+
+        const sortedBlocks = window.topologicalSort(formattedBlocks);
+
+        return sortedBlocks.map(block => ({
+            type: 'Single-Column',
+            bbox: { xMin: block.xMin, xMax: block.xMax, yMin: block.yMin, yMax: block.yMax },
+            items: block.items
+        }));
+    }
+
+    function processComplexGrid(items) {
+        function recursiveXYCut(items, depth = 0) {
+            if (depth > 10 || items.length < 5) return [{ items }];
+
+            const validItems = items.filter(it => !it.garbage && it.str && it.str.trim().length > 0 && (it.width || 0) >= 2 && (it.height || 0) >= 2);
+            if (validItems.length === 0) return [{ items }];
+
+            const xes = validItems.map(it => it.x + (it.width || 0));
+            const bXMin = Math.min(...validItems.map(it => it.x));
+            const bXMax = xes.length ? Math.max(...xes) : 0;
+            const bW = bXMax - bXMin;
+
+            const heights = validItems.map(it => it.height || 10).sort((a, b) => a - b);
+            const medianH = heights.length > 0 ? heights[Math.floor(heights.length / 2)] : 10;
+            const bXMid = bXMin + bW / 2;
+
+            let structItems = validItems.filter(it => {
+                const w = it.width || 0;
+                const h = it.height || 10;
+                const spansMiddle = (it.x <= bXMid - 10) && ((it.x + w) >= bXMid + 10);
+                return w < bW * 0.9 && h <= medianH * 1.5 && !spansMiddle;
+            });
+            if (structItems.length === 0) structItems = validItems;
+
+            const xIntervals = structItems.map(it => [it.x, it.x + (it.width || 0)]);
+            const yIntervals = structItems.map(it => [it.y, it.y + (it.height || 10)]);
+
+            function mergeIntervals(intervals, tol) {
+                if (intervals.length === 0) return [];
+                intervals.sort((a, b) => a[0] - b[0]);
+                const merged = [[intervals[0][0], intervals[0][1]]];
+                for (let i = 1; i < intervals.length; i++) {
+                    const last = merged[merged.length - 1];
+                    if (intervals[i][0] <= last[1] + tol) {
+                        last[1] = Math.max(last[1], intervals[i][1]);
+                    } else {
+                        merged.push([intervals[i][0], intervals[i][1]]);
+                    }
+                }
+                return merged;
+            }
+
+            const mergedX = mergeIntervals(xIntervals, 2);
+            const mergedY = mergeIntervals(yIntervals, 2);
+
+            const xGaps = [];
+            for (let i = 0; i < mergedX.length - 1; i++) {
+                xGaps.push({ start: mergedX[i][1], end: mergedX[i+1][0], size: mergedX[i+1][0] - mergedX[i][1] });
+            }
+            const yGaps = [];
+            for (let i = 0; i < mergedY.length - 1; i++) {
+                yGaps.push({ start: mergedY[i][1], end: mergedY[i+1][0], size: mergedY[i+1][0] - mergedY[i][1] });
+            }
+
+            let bestX = null;
+            if (xGaps.length > 0) {
+                bestX = xGaps.reduce((best, g) => {
+                    let score = g.size;
+                    if (bW > 300) {
+                        const gapCenter = (g.start + g.end) / 2;
+                        const distToMid = Math.abs(gapCenter - bXMid);
+                        score = g.size * Math.pow(1 - Math.min(distToMid / (bW / 2), 1), 2);
+                    }
+                    g.score = score;
+                    return (!best || g.score > best.score) ? g : best;
+                }, null);
+            }
+
+            const bestY = yGaps.length > 0 ? yGaps.reduce((max, g) => g.size > max.size ? g : max, yGaps[0]) : null;
+
+            const MIN_X_GAP = 5;
+            const MIN_Y_GAP = 4;
+
+            let cutAxis = null;
+            let cutVal = null;
+
+            if (bestX && (!bestY || bestX.size > bestY.size) && bestX.size >= MIN_X_GAP) {
+                cutAxis = 'X';
+                cutVal = (bestX.start + bestX.end) / 2;
+            } else if (bestY && bestY.size >= MIN_Y_GAP) {
+                cutAxis = 'Y';
+                cutVal = (bestY.start + bestY.end) / 2;
+            } else if (bestX && bestX.size >= MIN_X_GAP) {
+                cutAxis = 'X';
+                cutVal = (bestX.start + bestX.end) / 2;
+            }
+
+            if (!cutAxis) {
+                console.log(`[XYCut] Depth ${depth}: bW=${bW}, structItems=${structItems.length}, bestX=${bestX ? bestX.size : 'none'}, bestY=${bestY ? bestY.size : 'none'} -> NO CUT`);
+                return [{ items }];
+            }
+
+            console.log(`[XYCut] Depth ${depth}: CutAxis=${cutAxis}, CutVal=${cutVal}, bW=${bW}, bestX=${bestX ? bestX.size : 'none'}, bestY=${bestY ? bestY.size : 'none'}`);
+
+            const group1 = [];
+            const group2 = [];
+            const spanning = [];
+
+            if (cutAxis === 'X') {
+                for (const item of items) {
+                    const itemW = item.width || 0;
+                    if (itemW > bW * 0.55 && item.x < cutVal && (item.x + itemW) > cutVal) {
+                        spanning.push(item);
+                    } else {
+                        const center = item.x + itemW / 2;
+                        if (center < cutVal) group1.push(item);
+                        else group2.push(item);
+                    }
+                }
+            } else {
+                for (const item of items) {
+                    const center = item.y + (item.height || 10) / 2;
+                    if (center > cutVal) group1.push(item); 
+                    else group2.push(item);
+                }
+            }
+
+            if (group1.length === 0 || group2.length === 0) return [{ items }];
+
+            let r1 = recursiveXYCut(group1, depth + 1);
+            let r2 = recursiveXYCut(group2, depth + 1);
+            let rs = spanning.length > 0 ? recursiveXYCut(spanning, depth + 1) : [];
+
+            return [...r1, ...r2, ...rs];
         }
 
-        const colW = colXMax - colXMin;
+        const blocks = recursiveXYCut(items);
+        const formattedBlocks = blocks.map(block => {
+            const blockXMin = Math.min(...block.items.map(it => it.x));
+            const blockXMax = Math.max(...block.items.map(it => it.x + (it.width || 0)));
+            const blockYMin = Math.min(...block.items.map(it => it.y));
+            const blockYMax = Math.max(...block.items.map(it => it.y + (it.height || 10)));
+            
+            return {
+                type: 'Single-Column',
+                xMin: blockXMin, xMax: blockXMax, yMin: blockYMin, yMax: blockYMax,
+                bbox: { xMin: blockXMin, xMax: blockXMax, yMin: blockYMin, yMax: blockYMax },
+                items: block.items
+            };
+        });
 
-        // Try to find a sub-gutter within this column
-        const subGutters = findGutters(colItems).filter(g =>
-            g.x > colXMin + colW * 0.15 &&
-            g.x < colXMax - colW * 0.15
-        );
-
-        if (subGutters.length === 0) {
-            const lines = groupToLines(colItems);
-            return mergeLinesToParagraphs(lines);
+        const sortedBlocks = window.topologicalSort(formattedBlocks);
+        
+        console.log(`[Layout Engine] Sorted ${sortedBlocks.length} blocks:`);
+        for (let i = 0; i < sortedBlocks.length; i++) {
+            const b = sortedBlocks[i];
+            console.log(`  Block ${i}: x=[${Math.round(b.bbox.xMin)}, ${Math.round(b.bbox.xMax)}] y=[${Math.round(b.bbox.yMin)}, ${Math.round(b.bbox.yMax)}] items=${b.items.length} preview: ${b.items.slice(0,2).map(it=>it.str).join(' ')}`);
         }
 
-        const subGutter = subGutters[0].x;
+        return sortedBlocks.map(block => ({
+            type: 'Single-Column',
+            bbox: block.bbox,
+            items: block.items
+        }));
+    }
 
-        // Assign to left/right sub-columns
-        const leftItems = [], rightItems = [], wideItems = [];
-        for (const item of colItems) {
-            const iL = item.x, iR = item.x + (item.width || 0);
-            const iC = (iL + iR) / 2;
-            const iW = iR - iL;
-            const crossesSub = iL < subGutter - 5 && iR > subGutter + 5;
-            const isWide = iW > colW * 0.7;
-            if (crossesSub || isWide) {
+    // ── Helper: process landscape layout ─────────────────────────────
+    function processLandscape(items) {
+        const lines = groupIntoLines(items);
+        const blocks = mergeIntoBlocks(lines);
+
+        const formattedBlocks = blocks.map(block => ({
+            type: 'Single-Column',
+            xMin: block.xMin,
+            xMax: block.xMax,
+            yMin: block.yMin,
+            yMax: block.yMax,
+            items: block.items
+        }));
+
+        const sortedBlocks = window.topologicalSort(formattedBlocks);
+
+        return sortedBlocks.map(block => ({
+            type: 'Single-Column',
+            bbox: { xMin: block.xMin, xMax: block.xMax, yMin: block.yMin, yMax: block.yMax },
+            items: block.items
+        }));
+    }
+
+    // ── Helper: process multi-column layout ──────────────────────────
+    function processMultiColumn(items, gutterX) {
+        const leftItems = [];
+        const rightItems = [];
+        const wideItems = [];
+
+        for (const item of items) {
+            const itemLeft = item.x;
+            const itemRight = item.x + (item.width || 0);
+            const itemCenter = (itemLeft + itemRight) / 2;
+            const itemWidth = itemRight - itemLeft;
+
+            let crossesGutter = false;
+            if (itemWidth > pageW * 0.55) {
+                crossesGutter = true;
+            } else if (itemLeft < gutterX - 2 && itemRight > gutterX + 2) {
+                crossesGutter = true;
+            }
+
+            if (crossesGutter) {
                 wideItems.push(item);
-            } else if (iC < subGutter) {
+            } else if (itemCenter < gutterX) {
                 leftItems.push(item);
             } else {
                 rightItems.push(item);
             }
         }
 
-        if (leftItems.length === 0 || rightItems.length === 0) {
-            // Sub-split didn't work, just merge everything
-            const lines = groupToLines(colItems);
-            return mergeLinesToParagraphs(lines);
-        }
+        const leftBlocks = processSingleColumn(leftItems);
+        const rightBlocks = processSingleColumn(rightItems);
+        const wideBlocks = processSingleColumn(wideItems);
 
-        const leftParas = splitIntoParagraphs(leftItems, colXMin, subGutter, depth + 1);
-        const rightParas = splitIntoParagraphs(rightItems, subGutter, colXMax, depth + 1);
-
-        // Wide within sub-columns
-        const wideLines = groupToLines(wideItems);
-        const wideParagraphs = mergeLinesToParagraphs(wideLines);
-
-        // Order: wide items at top/bottom, left, right
-        const allSubParas = [...leftParas, ...rightParas, ...wideParagraphs];
-        const subColTop = allSubParas.length > 0 ? Math.max(...allSubParas.map(p => p.yMin)) : -Infinity;
-
-        const subHeaderBlocks = wideParagraphs.filter(p => (p.yMin + p.yMax) / 2 > subColTop - 10);
-        const subFooterBlocks = wideParagraphs.filter(p => (p.yMin + p.yMax) / 2 <= subColTop - 10);
-
-        leftParas.sort((a, b) => b.yMin - a.yMin);
-        rightParas.sort((a, b) => b.yMin - a.yMin);
-        subHeaderBlocks.sort((a, b) => b.yMin - a.yMin);
-        subFooterBlocks.sort((a, b) => b.yMin - a.yMin);
-
-        return [...subHeaderBlocks, ...leftParas, ...rightParas, ...subFooterBlocks];
+        const allBlocks = [...leftBlocks, ...rightBlocks, ...wideBlocks];
+        const sortedBlocks = window.topologicalSort(allBlocks);
+        return sortedBlocks;
     }
 
-    const gutters = findGutters(boxItems);
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 1: Classify page layout
+    // ═══════════════════════════════════════════════════════════════════
+    let layoutType = 'Single-Column';
+    let gutters = [];
+    let gutterX = -1;
 
-    // Single column (no gutters)
-    if (gutters.length === 0) {
-        const lines = groupToLines(boxItems);
-        const paras = mergeLinesToParagraphs(lines);
-        paras.sort((a, b) => b.yMin - a.yMin); // Top to bottom
-        return paras.map(p => ({
-            type: 'Single-Column',
-            bbox: { xMin: p.xMin, xMax: p.xMax, yMin: p.yMin, yMax: p.yMax },
-            items: p.items
-        }));
-    }
-
-    // Multi-column: assign items to columns using primary gutter
-    const primaryGutter = gutters[0].x;
-
-    const wideItems = [];
-    const columnItems = Array.from({ length: 2 }, () => []);
-
-    for (const item of boxItems) {
-        const itemLeft = item.x;
-        const itemRight = item.x + (item.width || 0);
-        const itemCenter = (itemLeft + itemRight) / 2;
-        const itemWidth = itemRight - itemLeft;
-
-        // Wide item: spans the gutter or is very wide relative to page
-        const crossesGutter = itemLeft < primaryGutter - 5 && itemRight > primaryGutter + 5;
-        const isPageWide = itemWidth > pageW * 0.55;
-
-        if (crossesGutter || isPageWide) {
-            wideItems.push(item);
-        } else if (itemCenter < primaryGutter) {
-            columnItems[0].push(item); // Left column
+    if (boxItems.length >= 5) {
+        if (pageW > pageH * 1.05) {
+            layoutType = 'Landscape/Presentation';
         } else {
-            columnItems[1].push(item); // Right column
+            gutters = findVerticalGutters(boxItems);
+            if (gutters.length > 1) {
+                layoutType = 'Complex/Mixed-Grid';
+            } else if (gutters.length === 1) {
+                layoutType = 'Multi-Column';
+                gutterX = gutters[0].x;
+            } else {
+                layoutType = 'Single-Column';
+            }
         }
     }
 
-    // Split each column recursively (handles sidebar quotes, sub-columns)
-    const leftXMax = primaryGutter;
-    const rightXMin = primaryGutter;
-    const colParagraphs = [
-        splitIntoParagraphs(columnItems[0], 0, leftXMax, 0),
-        splitIntoParagraphs(columnItems[1], rightXMin, pageW, 0)
-    ];
-
-    // Wide blocks (headers/footers spanning the full page)
-    const wideLines = groupToLines(wideItems);
-    const wideParagraphs = mergeLinesToParagraphs(wideLines);
-
-    // Find where columns start/end to classify wide blocks as header or footer
-    const allColParas = [...colParagraphs[0], ...colParagraphs[1]];
-    let colTop = -Infinity;
-    if (allColParas.length > 0) {
-        colTop = Math.max(...allColParas.map(p => p.yMin));
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 1.5: Identify "ARTICLE INFORMATION" or "REFERENCES" headers
+    // and extract everything below them to the end of the page.
+    // ═══════════════════════════════════════════════════════════════════
+    let refYThreshold = -1;
+    const tempLines = groupIntoLines([...boxItems], false);
+    for (const line of tempLines) {
+        const text = line.items.map(it => it.str).join('').replace(/\s+/g, ' ').trim().toUpperCase();
+        if (text === 'ARTICLE INFORMATION' || text === 'REFERENCES') {
+            refYThreshold = line.yMax + 5;
+            break;
+        }
     }
 
-    const headerBlocks = [];
-    const footerBlocks = [];
-    for (const p of wideParagraphs) {
-        const pCenter = (p.yMin + p.yMax) / 2;
-        if (pCenter > colTop - 10) {
-            headerBlocks.push(p);
+    let mainItems = boxItems;
+    let refItems = [];
+    if (refYThreshold !== -1) {
+        mainItems = [];
+        for (const item of boxItems) {
+            if (item.y <= refYThreshold) {
+                refItems.push(item);
+            } else {
+                mainItems.push(item);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 2: Route to specialized layout processors
+    // ═══════════════════════════════════════════════════════════════════
+    console.log(`[Layout Engine] Page size: ${Math.round(pageW)}x${Math.round(pageH)}, Classified: ${layoutType}, Gutters: ${gutters.map(g => Math.round(g.x)).join(', ')}`);
+
+    let blocks;
+    if (layoutType === 'Landscape/Presentation') {
+        blocks = processLandscape(mainItems);
+    } else if (layoutType === 'Multi-Column') {
+        blocks = processMultiColumn(mainItems, gutterX);
+    } else if (layoutType === 'Complex/Mixed-Grid') {
+        blocks = processComplexGrid(mainItems);
+    } else {
+        blocks = processSingleColumn(mainItems);
+    }
+
+    if (refItems.length > 0) {
+        let refBlocks;
+        if (layoutType === 'Landscape/Presentation') {
+            refBlocks = processLandscape(refItems);
+        } else if (layoutType === 'Multi-Column') {
+            refBlocks = processMultiColumn(refItems, gutterX);
+        } else if (layoutType === 'Complex/Mixed-Grid') {
+            refBlocks = processComplexGrid(refItems);
         } else {
-            footerBlocks.push(p);
+            refBlocks = processSingleColumn(refItems);
         }
+        blocks = blocks.concat(refBlocks);
     }
 
-    colParagraphs[0].sort((a, b) => b.yMin - a.yMin);
-    colParagraphs[1].sort((a, b) => b.yMin - a.yMin);
-    headerBlocks.sort((a, b) => b.yMin - a.yMin);
-    footerBlocks.sort((a, b) => b.yMin - a.yMin);
-
-    // Final reading order: headers → left column → right column → footers
-    const ordered = [...headerBlocks, ...colParagraphs[0], ...colParagraphs[1], ...footerBlocks];
-
-    return ordered.map(p => ({
-        type: 'Single-Column',
-        bbox: { xMin: p.xMin, xMax: p.xMax, yMin: p.yMin, yMax: p.yMax },
-        items: p.items
-    }));
+    return blocks;
 }
-
 
 window.executePdfConversion = async function (files) {
     showProgressState(true);
@@ -638,32 +826,47 @@ window.executePdfConversion = async function (files) {
 
 
 function groupItemsIntoLines(itemList) {
-                        itemList.sort((a, b) => b.y - a.y || a.x - b.x);
+                        itemList.sort((a, b) => Math.abs(b.y - a.y) < 2 ? a.x - b.x : b.y - a.y);
                         const lines = [];
                         for (const item of itemList) {
                             const last = lines[lines.length - 1];
                             const tol = Math.max(3, (item.height || 10) * 0.45);
 
                             let isSameLine = false;
-                            if (last && Math.abs(item.y - last.y) <= tol) {
+                            if (last) {
                                 const gap = item.x - last.xMax;
                                 // Keep a tight merging threshold so columns don't bleed into each other.
                                 const maxLineGap = (item.height || 10) * 1.5;
-                                if (gap < maxLineGap) isSameLine = true;
+                                const yDiff = Math.abs(item.y - last.y);
+                                if (gap >= -5 && gap < maxLineGap && yDiff <= Math.max(3, (item.height || 10) * 0.8)) {
+                                    isSameLine = true;
+                                } else if (item.y < last.y && yDiff > 2 && yDiff < 15 && item.height < last.height * 0.95 && /^\d+$/.test(item.str.trim())) {
+                                    // It's a superscript number!
+                                    isSameLine = true;
+                                    item.isSuperscript = true;
+                                    item.isFootnoteNum = true;
+                                }
                             }
 
                             if (isSameLine) {
                                 last.items.push(item);
                                 if (item.garbage) last.garbage = true;
-                                last.height = Math.max(last.height, item.height);
-                                last.fontSize = Math.max(last.fontSize, item.fontSize);
-                                last.isBold = last.isBold || item.isBold;
-                                last.xMin = Math.min(last.xMin, item.x);
-                                last.xMax = Math.max(last.xMax, item.x + item.width);
+                                last.xMax = Math.max(last.xMax, item.x + (item.width || 0));
+                                last.yMin = Math.min(last.yMin, item.y);
+                                last.yMax = Math.max(last.yMax, item.y + (item.height || 10));
+                                if (item.isSuperscript) {
+                                    last.str += ` [${item.str.trim()}]`;
+                                } else if (item.x - (last.items[last.items.length - 2].x + (last.items[last.items.length - 2].width || 0)) > (item.height || 10) * 0.2) {
+                                    last.str += ' ' + item.str;
+                                } else {
+                                    last.str += item.str;
+                                }
                             } else {
                                 lines.push({
-                                    y: item.y, height: item.height, fontSize: item.fontSize, isBold: item.isBold,
+                                    y: item.y, height: item.height || 10, fontSize: item.fontSize, isBold: item.isBold,
                                     items: [item], garbage: item.garbage, xMin: item.x, xMax: item.x + (item.width || 0),
+                                    yMin: item.y, yMax: item.y + (item.height || 10),
+                                    str: item.str
                                 });
                             }
                         }
@@ -682,14 +885,15 @@ function groupItemsIntoLines(itemList) {
                             const isRepeating = repeatingFPs.has(rawNoSpace);
                             const isPageNumber = /^\d+$/.test(rawNoSpace) || /^(Page\s*)?\d+(\s*of\s*\d+)?$/i.test(rawNoSpace) || /^(pg\.?\s*)?\d+$/i.test(rawNoSpace);
                             const isMargin = lg.y > pageH * 0.90 || lg.y < pageH * 0.10;
+                            const isOpinionHeader = /^\s*(opinion|opinionviewpoint)\s*$/i.test(rawNoSpace);
                             
-                            if ((isRepeating && isMargin) || (isPageNumber && isMargin)) {
+                            if ((isRepeating && isMargin) || (isPageNumber && isMargin) || isOpinionHeader) {
                                 lg.garbage = true;
                                 lg.items.forEach(it => it.garbage = true);
                             }
 
-                            lg.text = containsRTL(lineStr) ? lg.items.filter(it => !it.garbage).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage));
-                            lg.rawText = containsRTL(lineStr) ? lg.items.map(it => it.str).join(' ') : joinLineItems(lg.items);
+                            lg.text = containsRTL(lineStr) ? lg.items.filter(it => !it.garbage && !it.isFootnoteNum).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage && !it.isFootnoteNum));
+                            lg.rawText = containsRTL(lineStr) ? lg.items.filter(it => !it.isFootnoteNum).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.isFootnoteNum));
                         }
                         return lines;
                     }
@@ -708,17 +912,7 @@ function groupItemsIntoLines(itemList) {
                         remainingItems.push(item);
                     }
 
-                    let textBlocks;
-                    if (window.state && window.state.rawTextMode) {
-                        // Raw text dump mode: bypass segmentBox DLA and just treat page as single column
-                        textBlocks = [{
-                            type: 'text',
-                            bbox: { xMin: 0, xMax: pageW, yMin: 0, yMax: pageH },
-                            items: remainingItems
-                        }];
-                    } else {
-                        textBlocks = segmentBox(remainingItems, pageW, pageH);
-                    }
+                    const textBlocks = segmentBox(remainingItems, pageW, pageH);
 
                     const allRegions = [...textBlocks];
                     for (const r of regions) {
@@ -775,7 +969,6 @@ function groupItemsIntoLines(itemList) {
                             parsedLines.forEach(l => l.blockIdx = blockIdx);
                             allLineGroups.push(...parsedLines);
                         } catch (blockErr) {
-                            console.log('[DEBUG] Block fallback for block ' + blockIdx + ' error:', blockErr);
                             logToTerminal(`DLA Block Error (Page ${pageNum}, Block ${blockIdx}): ${blockErr.message} -> OCR/Image Fallback.`, 'warn');
 
                             try {
@@ -857,10 +1050,8 @@ function groupItemsIntoLines(itemList) {
                         }
                     }
                     if (pageCanvas) { pageCanvas.width = 0; pageCanvas.height = 0; }
-                    console.log(`[DEBUG] Finished DLA parsing for page ${pageNum}. Blocks generated: ${blockIdx}, Line groups: ${allLineGroups.length}`);
                     const lineGroups = allLineGroups;
 
-                    // Create column-based sorting grouping
                     const maxColIdx = Math.max(0, ...allLineGroups.map(lg => lg.columnIndex || 0));
                     const columnsArr = Array.from({ length: maxColIdx + 1 }, (_, i) => allLineGroups.filter(lg => lg.columnIndex === i));
 
@@ -913,7 +1104,7 @@ function groupItemsIntoLines(itemList) {
 
                     // page garbage
                     // >60% garbage = image (exclude valid but consumed lines like tables)
-                    const activeLines = lineGroups.filter(l => !l.isTable && (l.rawText || '').trim().length > 0);
+                    const activeLines = lineGroups.filter(l => !l.isTable && !l.isMath && (l.rawText || '').trim().length > 0);
                     const totalLines = activeLines.length;
                     const garbageLines2 = activeLines.filter(l => l.garbage).length;
                     const pageGarbageRatio = totalLines > 0 ? garbageLines2 / totalLines : 0;
@@ -1021,10 +1212,6 @@ function groupItemsIntoLines(itemList) {
 
                     // to md — Smart paragraph merging, hyphen unwrapping, blockquote & heading detection
                     function linesToMd(lines) {
-                        if (window.state && window.state.rawTextMode) {
-                            return lines.map(lg => lg.items.map(it => it.str).join('').trim()).filter(t => t.length > 0);
-                        }
-
                         const mdArr = [];
                         let prevY = null;
                         let paragraphBuf = '';
@@ -1052,7 +1239,7 @@ function groupItemsIntoLines(itemList) {
                             const lg = lines[li];
                             // Recalculate text dynamically to exclude items consumed by tables/figures
                             const tempLineStr = lg.items.map(it => it.str).join('');
-                            lg.text = containsRTL(tempLineStr) ? lg.items.filter(it => !it.garbage).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage));
+                            lg.text = containsRTL(tempLineStr) ? lg.items.filter(it => !it.garbage && !it.isFootnoteNum).map(it => it.str).join(' ') : joinLineItems(lg.items.filter(it => !it.garbage && !it.isFootnoteNum));
                             if (lg.items.length > 0 && lg.items.filter(it => it.garbage).length / lg.items.length > 0.40) lg.garbage = true;
 
                             const txt = lg.text.trim();
@@ -1090,6 +1277,9 @@ function groupItemsIntoLines(itemList) {
                                 continue;
                             }
 
+                            // Blockquote: significantly indented from dominant left margin
+                            let isIndented = validLns.length > 3 && (lg.xMin - domLeftMargin) > bqIndent;
+
                             // --- Heading detection ---
                             let level = headingLevel(lg.fontSize, hThresh, lg.isBold);
                             // Fix overly aggressive headings where p85/p95 equals median body text
@@ -1105,6 +1295,33 @@ function groupItemsIntoLines(itemList) {
                                 if (gapH > modalGap * 1.3 && (!nextBody || !nextBody.isBold)) {
                                     level = 1;
                                 }
+                            }
+                            
+                            let fontBlockChars = txt.length;
+                            let fontBlockLines = 1;
+                            for (let j = li - 1; j >= 0; j--) {
+                                if (!lines[j].garbage && (lines[j].text || '').trim()) {
+                                    if (Math.abs(lines[j].fontSize - lg.fontSize) < 0.6) {
+                                        fontBlockChars += (lines[j].text || '').length;
+                                        fontBlockLines++;
+                                    } else break;
+                                }
+                            }
+                            for (let j = li + 1; j < lines.length; j++) {
+                                if (!lines[j].garbage && (lines[j].text || '').trim()) {
+                                    if (Math.abs(lines[j].fontSize - lg.fontSize) < 0.6) {
+                                        fontBlockChars += (lines[j].text || '').length;
+                                        fontBlockLines++;
+                                    } else break;
+                                }
+                            }
+
+                            // A blockquote/pull-quote should not be formatted as a heading
+                            // We use fontBlockChars > 115 to avoid stripping heading status from multi-line titles.
+                            // The title is ~89 chars, pull quote is ~136 chars.
+                            if (level > 0 && fontBlockChars > 115) {
+                                level = 0;
+                                isIndented = true; // force blockquote
                             }
 
                             if (level > 0) {
@@ -1125,9 +1342,6 @@ function groupItemsIntoLines(itemList) {
                                 Math.abs(lg.fontSize - prevLine.fontSize) < 0.6 &&
                                 gap > 0 && gap < modalGap * 1.6 &&
                                 Math.abs(lg.xMin - prevLine.xMin) < pageW * 0.1; // Ensure they are in the same column
-
-                            // Blockquote: significantly indented from dominant left margin
-                            const isIndented = validLns.length > 3 && (lg.xMin - domLeftMargin) > bqIndent;
 
                             if (isParaBreak || !isContinuation) {
                                 flushPara();

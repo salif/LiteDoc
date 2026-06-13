@@ -72,6 +72,11 @@ function detectCorruptedFonts(rawItems) {
 
     const corrupted = new Set();
     for (const [fn, stats] of Object.entries(byFont)) {
+        const fnLower = fn.toLowerCase();
+        if (fnLower.includes('math') || fnLower.includes('cmsy') || fnLower.includes('cmmi') || fnLower.includes('symbol')) {
+            continue; // Math fonts naturally use special characters, don't flag them as corrupted
+        }
+
         if (stats.chars < 3) continue;
         const suspRatio = stats.suspicious / stats.chars;
 

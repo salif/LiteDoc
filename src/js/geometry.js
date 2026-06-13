@@ -11,12 +11,32 @@ function dbscan(points, eps, minPts) {
   const clusters = [];
   const visited = new Set();
   const noise = [];
+  function bboxDist(a, b) {
+    const aXMin = a.x || a.xMin || 0;
+    const aXMax = a.xMax || (aXMin + (a.width || 0));
+    const aYMin = a.y || a.yMin || 0;
+    const aYMax = a.yMax || (aYMin + (a.height || 0));
+
+    const bXMin = b.x || b.xMin || 0;
+    const bXMax = b.xMax || (bXMin + (b.width || 0));
+    const bYMin = b.y || b.yMin || 0;
+    const bYMax = b.yMax || (bYMin + (b.height || 0));
+
+    const dx = Math.max(0, Math.max(aXMin - bXMax, bXMin - aXMax));
+    const dy = Math.max(0, Math.max(aYMin - bYMax, bYMin - aYMax));
+    
+    // If lines don't overlap horizontally at all (dx > 0), strongly penalize to prevent cross-column merges
+    const dxPenalty = dx > 0 ? dx * 20 : 0;
+    return Math.hypot(dxPenalty, dy);
+  }
+
   function regionQuery(pIdx) {
     const neighbors = [];
     const p = points[pIdx];
     for (let i = 0; i < points.length; i++) {
+      if (i === pIdx) continue;
       const q = points[i];
-      const dist = Math.hypot(p.x - q.x, p.y - q.y);
+      const dist = bboxDist(p, q);
       if (dist <= eps) neighbors.push(i);
     }
     return neighbors;
@@ -101,17 +121,29 @@ function topologicalSort(blocks) {
       const a = blocks[i];
       const b = blocks[j];
 
+      const axMin = a.xMin ?? (a.bbox && a.bbox.xMin) ?? 0;
+      const axMax = a.xMax ?? (a.bbox && a.bbox.xMax) ?? 0;
+      const ayMin = a.yMin ?? (a.bbox && a.bbox.yMin) ?? 0;
+      const ayMax = a.yMax ?? (a.bbox && a.bbox.yMax) ?? 0;
+
+      const bxMin = b.xMin ?? (b.bbox && b.bbox.xMin) ?? 0;
+      const bxMax = b.xMax ?? (b.bbox && b.bbox.xMax) ?? 0;
+      const byMin = b.yMin ?? (b.bbox && b.bbox.yMin) ?? 0;
+      const byMax = b.yMax ?? (b.bbox && b.bbox.yMax) ?? 0;
+
       // Vertical ordering constraint:
       // a is above b, and they overlap horizontally
-      const vertOverlap = Math.max(a.xMin, b.xMin) < Math.min(a.xMax, b.xMax);
-      const isAbove = a.yMin >= b.yMax - 5; // tolerance of 5px
+      const vertOverlapAmt = Math.max(0, Math.min(axMax, bxMax) - Math.max(axMin, bxMin));
+      const minW = Math.min(axMax - axMin, bxMax - bxMin);
+      const vertOverlap = vertOverlapAmt > Math.min(10, minW * 0.1);
+      const isAbove = ayMin >= byMax - 10; // tolerance of 10px
       
       // Horizontal ordering constraint:
       // a is to the left of b, and they overlap vertically
-      const horizOverlap = a.xMax <= b.xMin + 5;
-      const vertOverlapY = Math.max(a.yMin, b.yMin) < Math.min(a.yMax, b.yMax);
+      const isLeft = axMax <= bxMin + 20;
+      const vertOverlapY = Math.max(ayMin, byMin) < Math.min(ayMax, byMax) + 20;
 
-      if ((isAbove && vertOverlap) || (horizOverlap && vertOverlapY)) {
+      if ((isAbove && vertOverlap) || (isLeft && vertOverlapY)) {
         adj[i].push(j);
         inDegree[j]++;
       }
@@ -123,19 +155,40 @@ function topologicalSort(blocks) {
   for (let i = 0; i < n; i++) {
     if (inDegree[i] === 0) {
       queue.push(i);
+    } else {
+      // console.log(`Block ${i} has inDegree ${inDegree[i]}`);
     }
   }
 
-  const result = [];
+  let result = [];
   while (queue.length > 0) {
-    // Custom heuristic: sort queue to prioritize leftmost (xMin), then topmost (yMax)
+    // Custom heuristic: sort queue to prioritize leftmost (xMin) for distinct columns,
+    // then topmost (yMax) for blocks within the same column.
     queue.sort((idxA, idxB) => {
       const a = blocks[idxA];
       const b = blocks[idxB];
-      if (Math.abs(a.xMin - b.xMin) > 8) {
-        return a.xMin - b.xMin; // leftmost first
+      
+      const axMin = a.xMin ?? (a.bbox && a.bbox.xMin) ?? 0;
+      const axMax = a.xMax ?? (a.bbox && a.bbox.xMax) ?? 0;
+      const ayMax = a.yMax ?? (a.bbox && a.bbox.yMax) ?? 0;
+
+      const bxMin = b.xMin ?? (b.bbox && b.bbox.xMin) ?? 0;
+      const bxMax = b.xMax ?? (b.bbox && b.bbox.xMax) ?? 0;
+      const byMax = b.yMax ?? (b.bbox && b.bbox.yMax) ?? 0;
+
+      const horizOverlapAmt = Math.max(0, Math.min(axMax, bxMax) - Math.max(axMin, bxMin));
+      const minWidth = Math.min(axMax - axMin, bxMax - bxMin);
+      const horizOverlap = horizOverlapAmt > Math.min(15, minWidth * 0.15);
+      
+      if (!horizOverlap) {
+        return axMin - bxMin; // distinct columns: leftmost first
       }
-      return b.yMax - a.yMax; // topmost first (descending Y)
+
+      const yDiff = byMax - ayMax;
+      if (Math.abs(yDiff) < 15) {
+        return axMin - bxMin; // leftmost first if on same logical row
+      }
+      return yDiff; // topmost first
     });
 
     const u = queue.shift();

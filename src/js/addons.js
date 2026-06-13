@@ -796,10 +796,16 @@
                 }
             }
 
-            const firstItem = grid[0].line.cells.find(c => c.items.length)?.items[0];
-            const parentLg = firstItem ? ctx.lineGroups.find(lg => lg.items.includes(firstItem)) : null;
+            const tableYMin = Math.min(...grid.flatMap(r => r.line.cells.flatMap(c => c.items.map(it => it.y))));
+            
+            // Find the first logical line group that is physically below the table
+            const belowLgs = ctx.lineGroups
+                .filter(lg => lg.y < tableYMin - 5 && lg.blockIdx !== undefined)
+                .sort((a, b) => a.blockIdx - b.blockIdx);
+            
+            const targetLg = belowLgs.length > 0 ? belowLgs[0] : null;
 
-            if (parentLg) parentLg.injectedMarkdown = (parentLg.injectedMarkdown || '') + tableMd;
+            if (targetLg) targetLg.injectedMarkdown = (targetLg.injectedMarkdown || '') + tableMd;
             else md += tableMd;
 
             tableState.idx++;
@@ -808,7 +814,153 @@
     }
 
     async function detectMathRegions(ctx) {
-        return '';
+        if (!settings.mathEnabled) return '';
+        const { page, pdfjsLib, pageNum, pageW, pageH, fileName, lineGroups, extractedImages, logToTerminal } = ctx;
+
+        let mathRegions = [];
+        let currentRegion = null;
+
+        for (let i = 0; i < lineGroups.length; i++) {
+            const lg = lineGroups[i];
+            if (lg.isTable) continue;
+
+            let totalChars = 0;
+            let mathChars = 0;
+
+            for (const item of lg.items) {
+                const txt = item.str.trim();
+                if (!txt) continue;
+                totalChars += txt.length;
+
+                const fontName = (item.fontName || '').toLowerCase();
+                const isMathFont = fontName.includes('math') || fontName.includes('cmsy') || fontName.includes('cmmi') || fontName.includes('symbol');
+
+                let hasMathUnicode = false;
+                for (let j = 0; j < txt.length; j++) {
+                    const code = txt.charCodeAt(j);
+                    if (
+                        (code >= 0x2200 && code <= 0x22FF) || // Math Operators
+                        (code >= 0x2190 && code <= 0x21FF) || // Arrows
+                        (code >= 0x0370 && code <= 0x03FF) || // Greek
+                        (code >= 0xE000 && code <= 0xF8FF) || // PUA
+                        (code >= 0xF0000)                     // PUA-supp
+                    ) {
+                        hasMathUnicode = true;
+                        break;
+                    }
+                }
+
+                if (isMathFont || hasMathUnicode || txt === '=' || txt === '+' || txt === '-' || txt === '±') {
+                    mathChars += txt.length;
+                }
+            }
+
+            const isMathLine = totalChars > 0 && (mathChars / totalChars) > 0.25;
+
+            if (isMathLine) {
+                if (!currentRegion) {
+                    currentRegion = { 
+                        xMin: lg.xMin, xMax: lg.xMax, yMin: lg.yMin, yMax: lg.yMax,
+                        lines: [lg]
+                    };
+                } else {
+                    const distance = Math.max(0, currentRegion.yMin - lg.yMax);
+                    if (distance < lg.height * 3) {
+                        currentRegion.xMin = Math.min(currentRegion.xMin, lg.xMin);
+                        currentRegion.xMax = Math.max(currentRegion.xMax, lg.xMax);
+                        currentRegion.yMin = Math.min(currentRegion.yMin, lg.yMin);
+                        currentRegion.yMax = Math.max(currentRegion.yMax, lg.yMax);
+                        currentRegion.lines.push(lg);
+                    } else {
+                        mathRegions.push(currentRegion);
+                        currentRegion = { 
+                            xMin: lg.xMin, xMax: lg.xMax, yMin: lg.yMin, yMax: lg.yMax,
+                            lines: [lg]
+                        };
+                    }
+                }
+            } else {
+                if (currentRegion) {
+                    mathRegions.push(currentRegion);
+                    currentRegion = null;
+                }
+            }
+        }
+        if (currentRegion) mathRegions.push(currentRegion);
+
+        mathRegions = mathRegions.filter(r => (r.xMax - r.xMin) > 15 && (r.yMax - r.yMin) > 10);
+
+        if (mathRegions.length === 0) return '';
+
+        logToTerminal(`Math detection: Found ${mathRegions.length} math regions on page ${pageNum}`, 'success');
+
+        const stateObj = window.state || { selectedImgRes: 1 };
+        const SCALE = stateObj.selectedImgRes === 0 ? 1.5 : (stateObj.selectedImgRes === 1 ? 2.0 : 2.5);
+        const vp = page.getViewport({ scale: SCALE });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        const cctx = canvas.getContext('2d');
+        cctx.fillStyle = '#ffffff';
+        cctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: cctx, viewport: vp }).promise;
+
+        let md = '';
+        let mathIdx = 1;
+
+        for (const r of mathRegions) {
+            const pad = 12 * SCALE;
+            const sx = Math.max(0, r.xMin * SCALE - pad);
+            const sw = Math.min(canvas.width - sx, (r.xMax - r.xMin) * SCALE + pad * 2);
+            
+            const cropTopY = (pageH - r.yMax) * SCALE - pad;
+            const sy = Math.max(0, cropTopY);
+            const sh = Math.min(canvas.height - sy, (r.yMax - r.yMin) * SCALE + pad * 2);
+
+            if (sw < 10 || sh < 10) continue;
+
+            const crop = document.createElement('canvas');
+            crop.width = Math.round(sw);
+            crop.height = Math.round(sh);
+            const ccx = crop.getContext('2d');
+            ccx.fillStyle = '#ffffff';
+            ccx.fillRect(0, 0, crop.width, crop.height);
+            ccx.drawImage(canvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+
+            const q = stateObj.selectedImgRes === 0 ? 0.82 : (stateObj.selectedImgRes === 1 ? 0.9 : 0.96);
+            let dataUrl = '';
+            
+            try {
+                const blob = await new Promise(res => crop.toBlob(res, 'image/jpeg', q));
+                if (blob) {
+                    dataUrl = URL.createObjectURL(blob);
+                } else {
+                    dataUrl = crop.toDataURL('image/jpeg', q);
+                }
+            } catch(e) {
+                dataUrl = crop.toDataURL('image/jpeg', q);
+            }
+            
+            crop.width = 0; crop.height = 0;
+            
+            const name = `${fileName}_p${pageNum}_math${mathIdx}.jpg`;
+            extractedImages.push({ name, dataUrl, dims: `${Math.round(sw)}×${Math.round(sh)}` });
+
+            const mathMd = `\n\n[IMAGE: ${name}]\n\n`;
+
+            r.lines[0].injectedMarkdown = (r.lines[0].injectedMarkdown || '') + mathMd;
+
+            for (const lg of r.lines) {
+                lg.garbage = true;
+                lg.isMath = true;
+                for (const item of lg.items) item.garbage = true;
+            }
+
+            mathIdx++;
+        }
+        
+        canvas.width = 0; canvas.height = 0;
+        return md;
     }
 
     async function detectCitations(ctx) {
