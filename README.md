@@ -77,11 +77,16 @@ No dependencies, no server uploads, no privacy concerns. It runs entirely on you
 
 ## 🚀 Getting Started
 
-Because LiteDoc is a purely client-side web application, you can run the pre-built version instantly:
+Because LiteDoc is a purely client-side web application, you don't need to install any dependencies to run it! 
 
+**The Easiest Way:**
+1. Go to the [Releases page](https://github.com/0xovo/LiteDoc/releases).
+2. Download the `index.html` file from the latest release.
+3. Open the downloaded `index.html` file in any modern web browser (Chrome, Edge, Firefox, Safari) and drag and drop your PDFs!
+
+**Run from Source:**
 1. Clone or download this repository.
-2. Open `dist/index.html` in any modern web browser (Chrome, Edge, Firefox, Safari).
-3. Drag and drop your PDFs!
+2. Open `dist/index.html` in your browser.
 
 ### Development & Custom Builds
 If you want to modify the source code:
@@ -105,9 +110,34 @@ LiteDoc relies on a powerful stack of client-side libraries:
 * **KaTeX** - Fast math typesetting in the Markdown previewer.
 * **Ace Editor** - High-performance code editor for tweaking Markdown before export.
 
-## 🤝 Contributing
+## 🧠 The Mathematics of Document Layout Analysis (DLA)
 
-Contributions, issues, and feature requests are welcome! Since the goal is to keep the tool accessible and server-free, any PRs should adhere to the "100% client-side" philosophy.
+Unlike basic wrapper libraries that blindly extract text sequentially from top to bottom, LiteDoc utilizes advanced Document Layout Analysis (DLA) and topological graph algorithms natively in your browser. This ensures structurally perfect extractions for complex formats like multi-column scientific papers, journals, and math-heavy PDFs.
+
+### 1. Recursive X-Y Cut Algorithm
+I employ a top-down **Recursive XY-Cut Algorithm** to cleanly divide pages into discrete rectangular regions. 
+- The algorithm projects text block coordinates onto the X and Y axes, building density histograms.
+- It mathematically detects "valleys" (gutters or whitespace gaps) and slices the document recursively until it isolates individual columns, headers, and floating sidebars without cross-contamination.
+
+### 2. Topological Sorting (Kahn's Algorithm)
+After slicing the page, the geometric blocks are mapped into a Directed Acyclic Graph (DAG).
+- I use **Kahn's Topological Sort** to determine the exact human reading order. 
+- Edges in the graph are defined by strict geometric constraints (e.g., prioritizing $x_{min}$ alignment and strict horizontal overlap margins). This eliminates "column interleaving" bugs where a right column might be accidentally read before the left.
+
+### 3. Mathematical Equation Heuristics & PUA Extraction
+Mathematical formulas are notoriously difficult to extract because PDF engines often map math symbols to the Private Use Area (PUA) of Unicode.
+- LiteDoc analyzes character densities and font registries (e.g., `CMSY`, `MathJax`) line-by-line. 
+- When an equation block is detected ($Density_{math} > 25\%$), instead of outputting corrupted text, LiteDoc geometrically calculates the strict bounding box of the multi-line formula.
+- The region is rendered onto an offscreen web canvas and seamlessly cropped into a high-fidelity image (`[IMAGE_MATH]`), perfectly preserving visual fractions and complex integrals.
+
+### 4. Smart Gibberish Scorer
+LiteDoc implements a robust Gibberish Scorer to identify heavily corrupted, custom-encoded "subset" fonts. It calculates a statistical $Suspicion Ratio$ based on illegal character blocks. When standard text fails this heuristic, LiteDoc safely isolates the text or dynamically routes the page to my WebAssembly OCR fallback (Tesseract.js) to recover the lost data.
+
+## 🤝 Contributing & Future Updates
+
+Contributions, issues, and feature requests are highly welcome! Since the goal is to keep the tool accessible and server-free, any PRs should adhere to the "100% client-side" philosophy.
+
+**A Note on Future Updates:** Up until now, bugs and algorithmic edge-cases have been tracked manually by the maintainer. Because I currently don't have anyone actively opening issues on the repository, **future updates will be rolling out at a slower pace**. If you find a bug or want a feature, *please open an issue!* It is the best way to drive the next wave of development.
 
 ## 💬 Connect & Socials
 
@@ -115,9 +145,11 @@ Contributions, issues, and feature requests are welcome! Since the goal is to ke
 - 🐙 **GitHub Repo:** [0xovo/LiteDoc](https://github.com/0xovo/LiteDoc)
 - 🐦 **Twitter / X:** [@0xovoo](https://x.com/0xovoo)
 
-## ☕ Support
+## ☕ Support & Donations
 
-I originally built this tool to help broke students stop burning their paid AI tokens just to parse their study materials. If LiteDoc saved you time or money, consider supporting the project!
+LiteDoc is—and always will be—100% free and open-source. I originally built this tool to help broke students stop burning their paid AI tokens just to parse their study materials. 
+
+If LiteDoc has saved you time, protected your privacy, or spared your wallet from expensive backend API costs, **please consider making a donation!** Your support is what keeps this project alive and continuously improving.
 
 <a href="https://ko-fi.com/0xovo" target="_blank"><img src="https://storage.ko-fi.com/cdn/kofi1.png?v=3" alt="Buy Me A Coffee" height="36"></a>
 
