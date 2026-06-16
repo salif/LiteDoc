@@ -17,7 +17,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 # Config
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 SRC_DIR  = PROJECT_ROOT / "src"
 DIST_DIR = PROJECT_ROOT / "dist"
@@ -34,6 +34,7 @@ JS_PREFERRED_ORDER  = [
     "js/pdf-parser.js",
     "js/ocr.js", "js/file-tree.js", "js/dropzone.js", "js/reset-utils.js",
     "js/downloads.js", "js/mobile-ux.js", "js/addons.js", "js/demo.js",
+    "js/litedoc-core.js",
     "js/main.js",  # must stay last
 ]
 
@@ -229,7 +230,17 @@ def build():
     print()
 
     # Bundle JS
-    print("── JavaScript ───────────────────────────")
+    print("👉 JavaScript (Rollup Bundling) 👈")
+    import subprocess
+    try:
+        rollup_res = subprocess.run(["npx.cmd", "rollup", "-c"], capture_output=True, text=True)
+        if rollup_res.returncode != 0:
+            log(WARN, f"Rollup failed (dependency missing?). Proceeding with current src/js files.\nError: {rollup_res.stderr.splitlines()[0] if rollup_res.stderr else 'Unknown'}")
+        else:
+            log(OK, "Rollup successfully bundled src/core into src/js/litedoc-core.js")
+    except Exception as e:
+        log(WARN, f"Could not run Rollup ({e}). Proceeding with current src/js files.")
+        
     js_blob = bundle_js(SRC_DIR, js_files)
     print()
 

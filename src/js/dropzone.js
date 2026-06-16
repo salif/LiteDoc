@@ -191,12 +191,23 @@ async function handleStartProcess(e) {
         if (startLabel) startLabel.innerText = originalLabel;
 
         // Safe execution with fallback UI alert
-        if (typeof window.executePdfConversion === 'function') {
-            window.executePdfConversion(filesToProcess);
-        } else if (typeof window.startConversion === 'function') {
-            window.startConversion(filesToProcess);
-        } else {
-            window.showAlert('System Error', 'The PDF Parser module failed to load. Please ensure your script tags are correct in index.html.');
+        try {
+            if (typeof window.executePdfConversion === 'function') {
+                await window.executePdfConversion(filesToProcess);
+            } else if (typeof window.startConversion === 'function') {
+                await window.startConversion(filesToProcess);
+            } else {
+                window.showAlert('System Error', 'The PDF Parser module failed to load. Please ensure your script tags are correct in index.html.');
+                return;
+            }
+
+            if (window.finishProcessing) {
+                window.finishProcessing();
+            }
+        } catch (err) {
+            console.error('Conversion failed:', err);
+            window.showAlert('Processing Error', 'An error occurred during PDF conversion. Check the terminal for details.');
+            window.showProgressState(false);
         }
         document.getElementById('file-input').value = '';
     }
@@ -232,12 +243,19 @@ async function handleFilesSelected(files, originalCount = 0) {
             try {
                 const triaged = await window.__litedocAddons.triageFiles(state.pendingFiles, pdfjsLib);
                 state.pendingFiles = triaged;
+                // Clear the analyzing state so the UI updates and unlocks the start button
+                state.pendingFiles.forEach(f => { if (f.triage === 'analyzing') delete f.triage; });
                 renderDropZone();
             } catch (err) {
                 console.warn('Live triage failed', err);
                 state.pendingFiles.forEach(f => { if (f.triage === 'analyzing') delete f.triage; });
                 renderDropZone();
             }
+        } else {
+            // FALLBACK: If opened via file:/// and modules fail to load, clear 'analyzing' to prevent a UI hang
+            state.pendingFiles.forEach(f => { if (f.triage === 'analyzing') delete f.triage; });
+            renderDropZone();
+            console.warn('LiteDoc Addons not found (likely due to file:// CORS). Falling back to basic processing.');
         }
     } else if (originalCount > 0) {
         showAlert('Invalid File', 'Please supply valid PDF document files.');

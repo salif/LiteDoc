@@ -108,6 +108,21 @@ function toggleTheme() {
             if (rawBtn) rawBtn.style.background = 'var(--bg-input)';
             if (rawKnob) { rawKnob.style.transform = 'translateX(0)'; rawKnob.style.background = 'rgba(255,255,255,0.4)'; }
         }
+
+        const excludePageNums = localStorage.getItem('litedoc-exclude-page-numbers');
+        state.excludePageNumbers = excludePageNums === 'true';
+        const pgnBtn = document.getElementById('pgnum-toggle-btn');
+        const pgnKnob = document.getElementById('pgnum-toggle-knob');
+        
+        // UI Logic: Toggle ON (accent) = Include (excludePageNumbers: false)
+        //           Toggle OFF (gray) = Exclude (excludePageNumbers: true)
+        if (!state.excludePageNumbers) {
+            if (pgnBtn) pgnBtn.style.background = 'var(--accent)';
+            if (pgnKnob) pgnKnob.style.transform = 'translateX(20px)';
+        } else {
+            if (pgnBtn) pgnBtn.style.background = 'var(--bg-input)';
+            if (pgnKnob) pgnKnob.style.transform = 'translateX(0)';
+        }
     });
 })();
 
@@ -148,6 +163,25 @@ function toggleMathRendering() {
     if (state.currentViewMode === 'rendered' && state.currentViewType === 'md') {
         const data = state.processedData[state.activeDataIndex];
         if (data) window.renderMarkdown(data.mdText);
+    }
+}
+
+// Page Numbers Toggle
+function togglePageNumbers() {
+    state.excludePageNumbers = !state.excludePageNumbers;
+    localStorage.setItem('litedoc-exclude-page-numbers', state.excludePageNumbers);
+
+    const btn = document.getElementById('pgnum-toggle-btn');
+    const knob = document.getElementById('pgnum-toggle-knob');
+    
+    // UI Logic: Toggle ON (accent) = Include (excludePageNumbers: false)
+    //           Toggle OFF (gray) = Exclude (excludePageNumbers: true)
+    if (!state.excludePageNumbers) {
+        if (btn) btn.style.background = 'var(--accent)';
+        if (knob) knob.style.transform = 'translateX(20px)';
+    } else {
+        if (btn) btn.style.background = 'var(--bg-input)';
+        if (knob) knob.style.transform = 'translateX(0)';
     }
 }
 
@@ -577,9 +611,30 @@ async function copyCurrentFile() {
     }
 }
 
+// Share functionality
+async function shareLiteDoc() {
+    const shareData = {
+        title: 'LiteDoc',
+        text: 'I just extracted Markdown from my PDFs 100% locally using LiteDoc! 🚀',
+        url: 'https://litedoc.xyz'
+    };
+
+    if (navigator.share) {
+        try {
+            await navigator.share(shareData);
+        } catch (err) {
+            console.error('Share failed:', err);
+        }
+    } else {
+        // Fallback to Twitter intent
+        window.open('https://twitter.com/intent/tweet?text=I%20just%20extracted%20Markdown%20from%20my%20PDFs%20100%25%20locally%20using%20LiteDoc!%20%F0%9F%9A%80%20Try%20it%20at%20litedoc.xyz&url=https://litedoc.xyz', '_blank');
+    }
+}
+
 // Global UI Exposures
 window.toggleTheme = toggleTheme;
 window.toggleMathRendering = toggleMathRendering;
+window.togglePageNumbers = togglePageNumbers;
 window.toggleAutoResolve = toggleAutoResolve;
 window.toggleRawTextMode = toggleRawTextMode;
 window.setAutoResolveAction = setAutoResolveAction;
@@ -595,3 +650,4 @@ window.closeDonationToast = closeDonationToast;
 window.openImagePreview = openImagePreview;
 window.closeImagePreview = closeImagePreview;
 window.navigateImage = navigateImage;
+window.shareLiteDoc = shareLiteDoc;

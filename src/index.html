@@ -114,7 +114,7 @@
                         style="background:var(--accent-hi)"></span>
                     <span class="relative inline-flex rounded-full h-1.5 w-1.5" style="background:var(--accent)"></span>
                 </span>
-                <span style="color:var(--text-2)">Version 2.2.0</span>
+                <span style="color:var(--text-2)">Version 2.5</span>
             </div>
 
             <!-- right controls -->
@@ -283,6 +283,22 @@
                                 class="relative w-10 h-5 rounded-full transition-all duration-300 focus:outline-none"
                                 style="background:var(--accent)" aria-label="Toggle math rendering">
                                 <span id="math-toggle-knob"
+                                    class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-300"
+                                    style="transform: translateX(20px);"></span>
+                            </button>
+                        </div>
+
+                        <!-- page numbers toggle -->
+                        <div class="mt-4 flex items-center justify-between">
+                            <div>
+                                <p class="settings-label" style="font-size:10px">Include Page Numbers</p>
+                                <p class="text-[10px] mt-0.5" style="color:var(--text-3)">Add "## Page X" headers to output
+                                </p>
+                            </div>
+                            <button id="pgnum-toggle-btn" onclick="togglePageNumbers()"
+                                class="relative w-10 h-5 rounded-full transition-all duration-300 focus:outline-none"
+                                style="background:var(--accent)" aria-label="Toggle page numbers">
+                                <span id="pgnum-toggle-knob"
                                     class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-300"
                                     style="transform: translateX(20px);"></span>
                             </button>
@@ -585,6 +601,15 @@
                                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                             </svg>
                             Download Files (.zip)
+                        </button>
+                        <button onclick="shareLiteDoc()"
+                            class="btn-ghost flex-1 sm:flex-initial text-xs font-medium px-4 py-2 flex items-center justify-center gap-1.5"
+                            title="Share LiteDoc"
+                            style="color: #fff; background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1);">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                            </svg>
+                            Share
                         </button>
                     </div>
                 </div>
@@ -1180,7 +1205,6 @@
     </div>
     <!-- LiteDoc Core Modules -->
     <script src="js/state.js"></script>
-    <script src="js/utils.js"></script>
     <script src="js/terminal.js"></script>
     <script src="js/reset-utils.js"></script>
     <script src="js/ui.js"></script>
@@ -1191,10 +1215,9 @@
     <script src="js/file-tree.js"></script>
     <script src="js/dropzone.js"></script>
     <script src="js/demo.js"></script>
-    <script src="js/addons.js"></script>
     <script src="js/ocr.js"></script>
     <script src="js/geometry.js"></script>
-    <script src="js/pdf-parser.js"></script>
+    <script src="js/litedoc-core.js"></script>
     <script src="js/main.js"></script>
 
 </body>

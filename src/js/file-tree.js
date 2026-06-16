@@ -280,3 +280,26 @@
             });
         }
 
+function finishProcessing() {
+    window.showProgressState(false);
+    const treeContent = document.getElementById('dynamic-tree-content');
+    if (treeContent) treeContent.innerHTML = '';
+    
+    state.processedData.forEach((data, idx) => {
+        renderFileToTree(data, idx);
+    });
+
+    updateSavingsUI();
+    
+    // Select the first file by default
+    if (state.processedData.length > 0) {
+        selectVirtualFile(0, 'md');
+    }
+}
+
+window.renderFileToTree = renderFileToTree;
+window.updateSavingsUI = updateSavingsUI;
+window.selectVirtualFile = selectVirtualFile;
+window.filterFileTree = filterFileTree;
+window.finishProcessing = finishProcessing;
+

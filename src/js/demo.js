@@ -12,28 +12,14 @@ async function loadSamplePDF() {
     window.logToTerminal('Compressed academic_paper_v3.pdf_p2_img1.jpg to match preset parameters.');
     await sleep(500);
 
-    const generatedMd = `\x3C!-- Converted from academic_paper_v3.pdf — 3 pages --\x3E
+    const showPageNums = !state.excludePageNumbers;
+    let generatedMd = `\x3C!-- Converted from academic_paper_v3.pdf — 3 pages --\x3E\n\n`;
 
-## Page 1
-# Abstract: Deep Structural Neural Mapping Architecture
-Deep learning strategies often fail when executing unstructured inputs directly.
-
-The loss function is defined as:
-
-$$L(\\theta) = -\\frac{1}{N}\\sum_{i=1}^{N} \\left[ y_i \\log(\\hat{y}_i) + (1-y_i)\\log(1-\\hat{y}_i) \\right]$$
-
-Where the gradient update rule is $\\theta \\leftarrow \\theta - \\eta \\nabla_\\theta L(\\theta)$.
-
-## Page 2
-[IMAGE: academic_paper_v3.pdf_p2_img1.jpg]
-[IMAGE: academic_paper_v3.pdf_p2_img2.jpg]
-
-## Page 3
-### Arabic Sample / نموذج عربي
-يُعدّ هذا التطبيق أداةً مجانيةً لتحويل ملفات PDF إلى صيغة Markdown.
-جميع العمليات تتم محليًا في متصفحك دون رفع أي ملف إلى خوادم خارجية.
-
-Euler's identity: $e^{i\\pi} + 1 = 0$`;
+    if (showPageNums) {
+        generatedMd += `## Page 1\n# Abstract: Deep Structural Neural Mapping Architecture\nDeep learning strategies often fail when executing unstructured inputs directly.\n\nThe loss function is defined as:\n\n$$L(\\theta) = -\\frac{1}{N}\\sum_{i=1}^{N} \\left[ y_i \\log(\\hat{y}_i) + (1-y_i)\\log(1-\\hat{y}_i) \\right]$$\n\nWhere the gradient update rule is $\\theta \\leftarrow \\theta - \\eta \\nabla_\\theta L(\\theta)$.\n\n## Page 2\n[IMAGE: academic_paper_v3.pdf_p2_img1.jpg]\n[IMAGE: academic_paper_v3.pdf_p2_img2.jpg]\n\n## Page 3\n### Arabic Sample / نموذج عربي\nيُعدّ هذا التطبيق أداةً مجانيةً لتحويل ملفات PDF إلى صيغة Markdown.\nجميع العمليات تتم محليًا في متصفحك دون رفع أي ملف إلى خوادم خارجية.\n\nEuler's identity: $e^{i\\pi} + 1 = 0$`;
+    } else {
+        generatedMd += `# Abstract: Deep Structural Neural Mapping Architecture\nDeep learning strategies often fail when executing unstructured inputs directly.\n\nThe loss function is defined as:\n\n$$L(\\theta) = -\\frac{1}{N}\\sum_{i=1}^{N} \\left[ y_i \\log(\\hat{y}_i) + (1-y_i)\\log(1-\\hat{y}_i) \\right]$$\n\nWhere the gradient update rule is $\\theta \\leftarrow \\theta - \\eta \\nabla_\\theta L(\\theta)$.\n\n[IMAGE: academic_paper_v3.pdf_p2_img1.jpg]\n[IMAGE: academic_paper_v3.pdf_p2_img2.jpg]\n\n### Arabic Sample / نموذج عربي\nيُعدّ هذا التطبيق أداةً مجانيةً لتحويل ملفات PDF إلى صيغة Markdown.\nجميع العمليات تتم محليًا في متصفحك دون رفع أي ملف إلى خوادم خارجية.\n\nEuler's identity: $e^{i\\pi} + 1 = 0$`;
+    }
 
     const sampleImages = [
         {

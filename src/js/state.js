@@ -8,6 +8,7 @@ window.state = {
     currentViewMode: 'raw',
     currentViewType: 'md',
     rawTextMode: false,
+    excludePageNumbers: false,
     currentImageIndex: null,
     splitRatio: 50,
     pendingFiles: [],
