@@ -282,7 +282,7 @@ if (dropZone) {
         e.preventDefault();
         dragCounter = 0;
         dropZone.classList.remove('drag-active');
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
         handleFilesSelected(files, e.dataTransfer.files.length);
     });
     dropZone.addEventListener('click', (e) => { 
