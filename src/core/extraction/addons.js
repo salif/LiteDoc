@@ -31,7 +31,7 @@ function persist() {
 // OCR Logic (Bridge to main ocr.js)
 async function ocrCanvas(canvas, fileName, options) {
     if (!window.__litedocOCR) return '[OCR ERROR: Model not loaded]';
-    return await window.__litedocOCR.recognize(canvas, options.ocrLang || 'eng');
+    return await window.__litedocOCR.ocrCanvas(canvas, null, { ocrEnabled: true, ocrLang: options.ocrLang || 'eng' });
 }
 
 function cleanupWorker() {

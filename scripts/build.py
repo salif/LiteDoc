@@ -304,7 +304,7 @@ def build():
         bench_html = BENCH_SRC.read_text(encoding="utf-8")
         
         # Custom minimal JS bundle for benchmark
-        bench_js_files = ["js/state.js", "js/utils.js", "js/pdf-parser.js", "js/benchmark.js"]
+        bench_js_files = ["js/state.js", "js/litedoc-core.js", "js/benchmark.js"]
         bench_js_files = [f for f in bench_js_files if (SRC_DIR / f).exists()]
         bench_js_blob = bundle_js(SRC_DIR, bench_js_files)
         

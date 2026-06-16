@@ -238,6 +238,7 @@
                 gray = (gray - 128) * contrast + 128;
                 const val = gray > threshold ? 255 : 0;
                 data[i] = data[i + 1] = data[i + 2] = val;
+                data[i + 3] = 255;
             }
             ctx.putImageData(imageData, 0, 0);
             return canvas;

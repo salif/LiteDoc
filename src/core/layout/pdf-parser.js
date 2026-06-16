@@ -454,6 +454,35 @@ export const executePdfConversion = async function (files) {
 
         try {
             checkSkip();
+            
+            // --- Handle Direct Image OCR ---
+            if (file.type && file.type.startsWith('image/')) {
+                logToTerminal(`[OCR] Direct image detected: ${file.name}. Starting OCR...`, 'info');
+                const img = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.onerror = reject;
+                        img.src = e.target.result;
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                
+                const canv = document.createElement('canvas');
+                canv.width = img.width; canv.height = img.height;
+                const ctx = canv.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                
+                const ocrLang = (addons.__litedocAddons && addons.__litedocAddons._settings.ocrLang) || 'eng';
+                const ocrText = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang });
+                
+                const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR) --\x3E\n\n## OCR Result\n\n${ocrText}`;
+                state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages: [], inlineRenders: {}, numPages: 1 });
+                continue fileLoop;
+            }
+
             const arrayBuffer = await file.arrayBuffer();
             checkSkip();
             const originalBuffer = arrayBuffer.slice ? arrayBuffer.slice(0) : new Uint8Array(arrayBuffer).slice().buffer;
@@ -641,6 +670,20 @@ export const executePdfConversion = async function (files) {
                     }
 
                     if (!items.length) {
+                        if (addons.__litedocAddons.ocrEnabled()) {
+                            logToTerminal(`[OCR] Page ${pageNum} seems to be a scan. Starting OCR...`, 'info');
+                            const vp = page.getViewport({ scale: 2.0 });
+                            const canv = document.createElement('canvas');
+                            canv.width = vp.width; canv.height = vp.height;
+                            const ctx = canv.getContext('2d');
+                            await page.render({ canvasContext: ctx, viewport: vp }).promise;
+                            const ocrText = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang });
+                            if (ocrText.trim()) {
+                                mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrText;
+                                page.cleanup();
+                                continue;
+                            }
+                        }
                         page.cleanup(); continue;
                     }
 
@@ -824,7 +867,7 @@ export const executePdfConversion = async function (files) {
                 await processChunk(chunkStart, Math.min(chunkStart + CHUNK_SIZE - 1, pdfDoc.numPages));
             }
             await pdfDoc.destroy();
-            state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders });
+            state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders, numPages: pdfDoc.numPages });
         } catch (err) { logToTerminal(`Failed: ${file.name}`, 'error'); }
     }
     updateProgress(100, 'Complete', '');

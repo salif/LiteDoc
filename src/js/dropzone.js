@@ -282,7 +282,7 @@ if (dropZone) {
         e.preventDefault();
         dragCounter = 0;
         dropZone.classList.remove('drag-active');
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
         handleFilesSelected(files, e.dataTransfer.files.length);
     });
     dropZone.addEventListener('click', (e) => { 
@@ -294,7 +294,7 @@ if (dropZone) {
 
 if (fileInput) {
     fileInput.addEventListener('change', e => {
-        const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+        const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
         handleFilesSelected(files, e.target.files.length);
         e.target.value = ''; // Reset input to allow selecting the same file again
     });
@@ -303,9 +303,9 @@ if (fileInput) {
 // paste handler
 document.addEventListener('paste', e => {
     if (e.clipboardData && e.clipboardData.files.length) {
-        const files = Array.from(e.clipboardData.files).filter(f => f.type === 'application/pdf');
+        const files = Array.from(e.clipboardData.files).filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
         handleFilesSelected(files, e.clipboardData.files.length);
-        if (files.length > 0) showToast(`${files.length} PDF file(s) pasted!`);
+        if (files.length > 0) showToast(`${files.length} file(s) pasted!`);
     }
 });
 
