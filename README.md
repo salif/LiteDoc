@@ -141,9 +141,17 @@ Contributions, issues, and feature requests are highly welcome! Since the goal i
 
 ## 💬 Connect & Socials
 
-- 🌐 **Website:** [litedoc.xyz](https://litedoc.xyz/)
-- 🐙 **GitHub Repo:** [0xovo/LiteDoc](https://github.com/0xovo/LiteDoc)
-- 🐦 **Twitter / X:** [@0xovoo](https://x.com/0xovoo)
+<div align="center">
+
+| | Link |
+|---|---|
+| 🌐 **Website** | [litedoc.xyz](https://litedoc.xyz) |
+| 𝕏 **Twitter** | [@0xovoo](https://x.com/0xovoo) |
+| ☕ **Ko-fi** | [ko-fi.com/0xovo](https://ko-fi.com/0xovo) |
+| 📦 **GitHub** | [github.com/0xovo/LiteDoc](https://github.com/0xovo/LiteDoc) |
+| 📧 **Email** | [contact@litedoc.xyz](mailto:contact@litedoc.xyz) |
+
+</div>
 
 ## ☕ Support & Donations
 
