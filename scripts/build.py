@@ -17,7 +17,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 # Config
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
+PROJECT_ROOT = SCRIPT_DIR.parent
 
 SRC_DIR  = PROJECT_ROOT / "src"
 DIST_DIR = PROJECT_ROOT / "dist"
@@ -232,14 +232,12 @@ def build():
     # Bundle JS
     print("👉 JavaScript (Rollup Bundling) 👈")
     import subprocess
-    try:
-        rollup_res = subprocess.run(["npx.cmd", "rollup", "-c"], capture_output=True, text=True)
-        if rollup_res.returncode != 0:
-            log(WARN, f"Rollup failed (dependency missing?). Proceeding with current src/js files.\nError: {rollup_res.stderr.splitlines()[0] if rollup_res.stderr else 'Unknown'}")
-        else:
-            log(OK, "Rollup successfully bundled src/core into src/js/litedoc-core.js")
-    except Exception as e:
-        log(WARN, f"Could not run Rollup ({e}). Proceeding with current src/js files.")
+    rollup_res = subprocess.run(["npx.cmd", "rollup", "-c"], capture_output=True, text=True)
+    if rollup_res.returncode != 0:
+        log(ERR, f"Rollup failed:\n{rollup_res.stderr}")
+        sys.exit(1)
+    else:
+        log(OK, "Rollup successfully bundled src/core into src/js/litedoc-core.js")
         
     js_blob = bundle_js(SRC_DIR, js_files)
     print()
@@ -304,7 +302,7 @@ def build():
         bench_html = BENCH_SRC.read_text(encoding="utf-8")
         
         # Custom minimal JS bundle for benchmark
-        bench_js_files = ["js/state.js", "js/litedoc-core.js", "js/benchmark.js"]
+        bench_js_files = ["js/state.js", "js/utils.js", "js/pdf-parser.js", "js/benchmark.js"]
         bench_js_files = [f for f in bench_js_files if (SRC_DIR / f).exists()]
         bench_js_blob = bundle_js(SRC_DIR, bench_js_files)
         
