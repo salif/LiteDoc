@@ -173,7 +173,8 @@ async function extractVectorRegions(ctx) {
     );
     if (!figures.length) return '';
 
-    const SCALE = state.selectedImgRes === 0 ? 1.5 : (state.selectedImgRes === 1 ? 2.0 : 2.5);
+    const imgRes = (typeof state !== 'undefined' && state.selectedImgRes) ? state.selectedImgRes : 1;
+    const SCALE = imgRes === 0 ? 1.5 : (imgRes === 1 ? 2.0 : 2.5);
     const vp = page.getViewport({ scale: SCALE });
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(vp.width);
@@ -182,7 +183,7 @@ async function extractVectorRegions(ctx) {
     cctx.fillStyle = '#ffffff';
     cctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: cctx, viewport: vp }).promise;
-    const checkSkip = () => { if (state.isSkippingFile) throw new Error('SKIP_FILE'); };
+    const checkSkip = () => { if (typeof state !== 'undefined' && state.isSkippingFile) throw new Error('SKIP_FILE'); };
     checkSkip();
 
     let md = '';
@@ -200,7 +201,7 @@ async function extractVectorRegions(ctx) {
         ccx.fillStyle = '#ffffff';
         ccx.fillRect(0, 0, crop.width, crop.height);
         ccx.drawImage(canvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-        const q = state.selectedImgRes === 0 ? 0.82 : (state.selectedImgRes === 1 ? 0.9 : 0.96);
+        const q = imgRes === 0 ? 0.82 : (imgRes === 1 ? 0.9 : 0.96);
         const dataUrl = crop.toDataURL('image/jpeg', q);
         crop.width = 0; crop.height = 0;
         const name = `${fileName}_p${pageNum}_figure${figIdx}.jpg`;
@@ -554,8 +555,8 @@ async function processTableLines(linesToProcess, ctx, columnLabel, tableState) {
 
 async function detectMathRegions(ctx) {
     if (!settings.mathEnabled) return '';
-    // Broaden symbol set and add operators
-    const mathSymbols = /[∑∫∂√∞≈≠≡≤≥πθλμσφωΔΩ=<>+−×÷^/_]/g;
+    // Math-specific symbols only — exclude common chars (=, +, /, <, >, ^, _) that trigger false positives
+    const mathSymbols = /[∑∫∂√∞≈≠≡≤≥πθλμσφωΔΩ−×÷∇∏∐∀∃∄∈∉∋∌⊂⊃⊆⊇⊕⊗⊥ζαβγδεηικξρστυϕχψωΓΛΞΠΣΥΦΨΩ\u2070-\u2079\u2080-\u209C\u207A-\u207E]/g;
 
     for (const lg of ctx.lineGroups) {
         if (lg.garbage || lg.isTable) continue;

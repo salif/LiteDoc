@@ -133,8 +133,10 @@ function joinLineItems(items, config) {
     if (!items.length) return '';
     const hm = (config && config.horizontalGapMultiplier) || 1.0;
     
-    // sort x
-    const sorted = [...items].sort((a, b) => a.x - b.x);
+    // sort x, skip whitespace-only items
+    const validItems = items.filter(it => it.str && it.str.trim());
+    if (!validItems.length) return '';
+    const sorted = [...validItems].sort((a, b) => a.x - b.x);
     let result = sorted[0].str;
     for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1];

@@ -1,0 +1,15 @@
+{
+  "horizontalGapMultiplier": 1.9963535370986907,
+  "rowSplitMultiplier": 3.977315455697803,
+  "horizontalGapMin": 12,
+  "bottomMarginThreshold": 0.7617617106512254,
+  "topMarginThreshold": 0.23511709756221322,
+  "distanceFromCenterPenalty": 6.495787902110461,
+  "tableDensityThreshold": 0.8719222135393621,
+  "pageGarbageRatioThreshold": 0.3905458162679626,
+  "paragraphGapThreshold": 0.6852447228771202,
+  "continuationGapThreshold": 0.9739378975653991,
+  "tableGapYThreshold": 4.194102406109853,
+  "itemOverlapTolerance": 9,
+  "garbageScoreThreshold": 0.17412123646291475
+}

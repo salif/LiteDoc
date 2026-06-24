@@ -71,11 +71,11 @@ function toggleTheme() {
         if (state.autoResolveEnabled) {
             if (arBtn) arBtn.style.background = 'var(--accent)';
             if (arKnob) arKnob.style.transform = 'translateX(20px)';
-            if (arSub) arSub.classList.remove('hidden');
+            if (arSub) { arSub.classList.remove('hidden'); arSub.style.display = 'flex'; }
         } else {
             if (arBtn) arBtn.style.background = 'var(--border)';
             if (arKnob) arKnob.style.transform = 'translateX(0)';
-            if (arSub) arSub.classList.add('hidden');
+            if (arSub) { arSub.classList.add('hidden'); arSub.style.display = 'none'; }
         }
 
         document.querySelectorAll('[data-ar]').forEach(b => {
@@ -273,11 +273,11 @@ function toggleAutoResolve() {
     if (state.autoResolveEnabled) {
         if (btn) btn.style.background = 'var(--accent)';
         if (knob) knob.style.transform = 'translateX(20px)';
-        if (sub) sub.classList.remove('hidden');
+        if (sub) { sub.classList.remove('hidden'); sub.style.display = 'flex'; }
     } else {
         if (btn) btn.style.background = 'var(--border)';
         if (knob) knob.style.transform = 'translateX(0)';
-        if (sub) sub.classList.add('hidden');
+        if (sub) { sub.classList.add('hidden'); sub.style.display = 'none'; }
     }
 }
 

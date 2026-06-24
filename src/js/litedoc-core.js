@@ -135,8 +135,10 @@ var LiteDocCore = (function () {
         if (!items.length) return '';
         const hm = (config && config.horizontalGapMultiplier) || 1.0;
         
-        // sort x
-        const sorted = [...items].sort((a, b) => a.x - b.x);
+        // sort x, skip whitespace-only items
+        const validItems = items.filter(it => it.str && it.str.trim());
+        if (!validItems.length) return '';
+        const sorted = [...validItems].sort((a, b) => a.x - b.x);
         let result = sorted[0].str;
         for (let i = 1; i < sorted.length; i++) {
             const prev = sorted[i - 1];
@@ -388,7 +390,8 @@ var LiteDocCore = (function () {
         );
         if (!figures.length) return '';
 
-        const SCALE = state.selectedImgRes === 0 ? 1.5 : (state.selectedImgRes === 1 ? 2.0 : 2.5);
+        const imgRes = (typeof state !== 'undefined' && state.selectedImgRes) ? state.selectedImgRes : 1;
+        const SCALE = imgRes === 0 ? 1.5 : (imgRes === 1 ? 2.0 : 2.5);
         const vp = page.getViewport({ scale: SCALE });
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(vp.width);
@@ -397,7 +400,7 @@ var LiteDocCore = (function () {
         cctx.fillStyle = '#ffffff';
         cctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: cctx, viewport: vp }).promise;
-        const checkSkip = () => { if (state.isSkippingFile) throw new Error('SKIP_FILE'); };
+        const checkSkip = () => { if (typeof state !== 'undefined' && state.isSkippingFile) throw new Error('SKIP_FILE'); };
         checkSkip();
 
         let md = '';
@@ -415,7 +418,7 @@ var LiteDocCore = (function () {
             ccx.fillStyle = '#ffffff';
             ccx.fillRect(0, 0, crop.width, crop.height);
             ccx.drawImage(canvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-            const q = state.selectedImgRes === 0 ? 0.82 : (state.selectedImgRes === 1 ? 0.9 : 0.96);
+            const q = imgRes === 0 ? 0.82 : (imgRes === 1 ? 0.9 : 0.96);
             const dataUrl = crop.toDataURL('image/jpeg', q);
             crop.width = 0; crop.height = 0;
             const name = `${fileName}_p${pageNum}_figure${figIdx}.jpg`;
@@ -669,8 +672,8 @@ var LiteDocCore = (function () {
 
     async function detectMathRegions(ctx) {
         if (!settings.mathEnabled) return '';
-        // Broaden symbol set and add operators
-        const mathSymbols = /[∑∫∂√∞≈≠≡≤≥πθλμσφωΔΩ=<>+−×÷^/_]/g;
+        // Math-specific symbols only — exclude common chars (=, +, /, <, >, ^, _) that trigger false positives
+        const mathSymbols = /[∑∫∂√∞≈≠≡≤≥πθλμσφωΔΩ−×÷∇∏∐∀∃∄∈∉∋∌⊂⊃⊆⊇⊕⊗⊥ζαβγδεηικξρστυϕχψωΓΛΞΠΣΥΦΨΩ\u2070-\u2079\u2080-\u209C\u207A-\u207E]/g;
 
         for (const lg of ctx.lineGroups) {
             if (lg.garbage || lg.isTable) continue;
@@ -1415,7 +1418,7 @@ var LiteDocCore = (function () {
 
             try {
                 checkSkip();
-
+                
                 // --- Handle Direct Image OCR ---
                 if (file.type && file.type.startsWith('image/')) {
                     logToTerminal(`[OCR] Direct image detected: ${file.name}. Starting OCR...`, 'info');
@@ -1430,21 +1433,21 @@ var LiteDocCore = (function () {
                         reader.onerror = reject;
                         reader.readAsDataURL(file);
                     });
-
+                    
                     const canv = document.createElement('canvas');
                     canv.width = img.width; canv.height = img.height;
                     const ctx = canv.getContext('2d');
                     ctx.drawImage(img, 0, 0);
-
+                    
                     const ocrLang = (__litedocAddons && __litedocAddons._settings.ocrLang) || 'eng';
-                    const ocrText = await ocrCanvas(canv, file.name, { ocrLang });
-
+                    const ocrText = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang });
+                    
                     const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR) --\x3E\n\n## OCR Result\n\n${ocrText}`;
                     state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages: [], inlineRenders: {}, numPages: 1 });
                     continue fileLoop;
-                    }
+                }
 
-                    const arrayBuffer = await file.arrayBuffer();
+                const arrayBuffer = await file.arrayBuffer();
                 checkSkip();
                 const originalBuffer = arrayBuffer.slice ? arrayBuffer.slice(0) : new Uint8Array(arrayBuffer).slice().buffer;
 
@@ -1590,7 +1593,6 @@ var LiteDocCore = (function () {
                         try {
                         const page = await pdfDoc.getPage(pageNum);
                         const textContent = await page.getTextContent({ includeMarkedContent: false });
-                        console.log(`[Core] Page ${pageNum}: Found ${textContent.items.length} raw text items.`);
                         const [_vx0, _vy0, _vx1, _vy1] = page.view;
                         const pageW = _vx1 - _vx0;
                         const pageH = _vy1 - _vy0;
@@ -1639,7 +1641,7 @@ var LiteDocCore = (function () {
                                 canv.width = vp.width; canv.height = vp.height;
                                 const ctx = canv.getContext('2d');
                                 await page.render({ canvasContext: ctx, viewport: vp }).promise;
-                                const ocrText = await ocrCanvas(canv, file.name, { ocrLang: docOcrLang });
+                                const ocrText = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang });
                                 if (ocrText.trim()) {
                                     mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrText;
                                     page.cleanup();
@@ -1707,7 +1709,6 @@ var LiteDocCore = (function () {
                         const activeLines = allLineGroups.filter(l => !l.isTable && (l.rawText || '').trim().length > 0);
                         const totalLines = activeLines.length;
                         const garbageLines = activeLines.filter(l => l.garbage).length;
-                        console.log(`[Core] Page ${pageNum}: totalLines=${totalLines}, garbageLines=${garbageLines}, ratio=${totalLines > 0 ? (garbageLines / totalLines).toFixed(2) : 0}`);
                         if (totalLines > 0 && (garbageLines / totalLines) > activeConfig.pageGarbageRatioThreshold) {
                             page.cleanup(); continue;
                         }
@@ -1808,20 +1809,17 @@ var LiteDocCore = (function () {
                             bodyBlocks[idx].push(lg);
                         }
                         const blockKeys = Object.keys(bodyBlocks).map(k => parseInt(k)).sort((a, b) => a - b);
-                        console.log(`[Core] Page ${pageNum}: blockKeys=[${blockKeys.join(', ')}]`);
-                        for (const k of blockKeys) {
-                            const blockMd = linesToMd(bodyBlocks[k]);
-                            console.log(`[Core] Block ${k}: lines=${bodyBlocks[k].length}, mdLines=${blockMd.length}`);
-                            pageMdLines.push(...blockMd);
-                        }
+                        for (const k of blockKeys) pageMdLines.push(...linesToMd(bodyBlocks[k]));
 
                         let pageMd = pageMdLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+                        
                         const showPageNums = typeof window !== 'undefined' && window.state ? !window.state.excludePageNumbers : true;
                         if (showPageNums) {
                             mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum}\n\n` + pageMd;
                         } else {
                             mdText += (pageNum > 1 ? '\n\n' : '') + pageMd;
                         }
+                        
                         page.cleanup();
                         } catch (e) {
                             console.error(`[Core Error] Page ${pageNum} processing failed:`, e);
