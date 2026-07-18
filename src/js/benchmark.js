@@ -4,13 +4,98 @@
 
 // Initialize PDF.js Worker (build.py will patch this URL with a data URI)
 if (typeof pdfjsLib !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 }
 
 const benchmarkBtn = document.getElementById('run-benchmark-btn');
 if (benchmarkBtn) {
     benchmarkBtn.addEventListener('click', runBenchmark);
 }
+
+// Keep references to original UI functions to restore them after benchmark
+let originalShowProgressState = null;
+let originalUpdateProgress = null;
+let originalLogToTerminal = null;
+
+function benchmarkShowProgressState() {}
+function benchmarkUpdateProgress() {}
+function benchmarkLogToTerminal(msg, type) {
+    const log = document.getElementById('benchmark-log');
+    if (!log) return;
+    const entry = document.createElement('div');
+    entry.textContent = `> ${msg}`;
+    if (type === 'error') entry.style.color = '#ef4444';
+    else if (type === 'warn') entry.style.color = '#eab308';
+    else if (type === 'success') entry.style.color = '#22c55e';
+    else if (type === 'info') entry.style.color = '#3b82f6';
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+window.toggleBenchmarkView = function () {
+    const appView = document.getElementById('app-view');
+    const benchView = document.getElementById('benchmark-view');
+    if (appView && benchView) {
+        if (benchView.classList.contains('hidden')) {
+            appView.classList.add('hidden');
+            benchView.classList.remove('hidden');
+            
+            // Backup and clear state for benchmark
+            window._litedocBackupState = {
+                data: window.state.processedData,
+                idx: window.state.activeDataIndex,
+                pending: window.state.pendingFiles
+            };
+            window.state.processedData = [];
+            window.state.activeDataIndex = 0;
+            window.state.pendingFiles = [];
+            
+            // Save originals if not already saved
+            if (!originalShowProgressState) {
+                originalShowProgressState = window.showProgressState;
+                originalUpdateProgress = window.updateProgress;
+                originalLogToTerminal = window.logToTerminal;
+            }
+            
+            // Swap to mocks
+            window.showProgressState = benchmarkShowProgressState;
+            window.updateProgress = benchmarkUpdateProgress;
+            window.logToTerminal = benchmarkLogToTerminal;
+        } else {
+            benchView.classList.add('hidden');
+            appView.classList.remove('hidden');
+            
+            // Restore state
+            if (window._litedocBackupState) {
+                // Clear benchmark blobs first
+                window.state.processedData.forEach(d => {
+                    if (d.extractedImages) d.extractedImages.forEach(img => URL.revokeObjectURL(img.dataUrl));
+                    if (d.inlineRenders) Object.values(d.inlineRenders).forEach(url => URL.revokeObjectURL(url));
+                });
+                
+                window.state.processedData = window._litedocBackupState.data;
+                window.state.activeDataIndex = window._litedocBackupState.idx;
+                window.state.pendingFiles = window._litedocBackupState.pending;
+                
+                if (window.state.processedData.length > 0) {
+                    if (window.updateFileTree) window.updateFileTree();
+                    if (window.renderMarkdownForActiveFile) window.renderMarkdownForActiveFile();
+                } else if (window.resetTool) {
+                    window.resetTool(true);
+                }
+                delete window._litedocBackupState;
+            }
+            
+            // Restore originals
+            if (originalShowProgressState) {
+                window.showProgressState = originalShowProgressState;
+                window.updateProgress = originalUpdateProgress;
+                window.logToTerminal = originalLogToTerminal;
+            }
+        }
+    }
+};
+
 
 async function runBenchmark() {
     const runBtn = document.getElementById('run-benchmark-btn');
@@ -25,7 +110,7 @@ async function runBenchmark() {
 
     try {
         // 1. Engine Spin-Up
-        logToTerminal('Phase 1: Measuring Engine Spin-Up...');
+        benchmarkLogToTerminal('Phase 1: Measuring Engine Spin-Up...');
         const t0 = performance.now();
         
         // Force-load worker by doing a tiny conversion
@@ -34,11 +119,11 @@ async function runBenchmark() {
         
         const spinUpTime = Math.round(performance.now() - t0);
         document.getElementById('spin-up-time').textContent = `${spinUpTime}ms`;
-        logToTerminal(`Spin-up complete: ${spinUpTime}ms`);
+        benchmarkLogToTerminal(`Spin-up complete: ${spinUpTime}ms`);
 
         // 2. PPT (Pages Per Toast - Synthetic Burst)
-        logToTerminal('Phase 2: Measuring Burst Throughput (PPT)...');
-        logToTerminal('Downloading tracemonkey.pdf (14 pages)...');
+        benchmarkLogToTerminal('Phase 2: Measuring Burst Throughput (PPT)...');
+        benchmarkLogToTerminal('Downloading tracemonkey.pdf (14 pages)...');
         const testPdf = await fetchTestPdf('https://raw.githubusercontent.com/mozilla/pdf.js/master/test/pdfs/tracemonkey.pdf', 'tracemonkey.pdf');
         
         const t1 = performance.now();
@@ -48,16 +133,16 @@ async function runBenchmark() {
         const numPages = state.processedData[0].numPages;
         const ppt = Math.round((numPages / (burstTime / 1000)) * 10) / 10;
         document.getElementById('ppt-metric').textContent = ppt;
-        logToTerminal(`Burst test: ${numPages} pages in ${Math.round(burstTime)}ms (PPT: ${ppt})`);
+        benchmarkLogToTerminal(`Burst test: ${numPages} pages in ${Math.round(burstTime)}ms (PPT: ${ppt})`);
 
         // 3. PPM (Pages Per Minute - Sustained)
-        logToTerminal('Phase 3: Measuring Sustained Throughput (PPM)...');
+        benchmarkLogToTerminal('Phase 3: Measuring Sustained Throughput (PPM)...');
         const iterations = 3;
         let totalPages = 0;
         const t2 = performance.now();
         
         for (let i = 0; i < iterations; i++) {
-            logToTerminal(`Iteration ${i+1}/${iterations}...`);
+            benchmarkLogToTerminal(`Iteration ${i+1}/${iterations}...`);
             await window.executePdfConversion([testPdf]);
             totalPages += state.processedData[0].numPages;
         }
@@ -65,12 +150,12 @@ async function runBenchmark() {
         const sustainedTime = performance.now() - t2;
         const ppm = Math.round((totalPages / (sustainedTime / 60000)));
         document.getElementById('ppm-metric').textContent = ppm;
-        logToTerminal(`Sustained test: ${totalPages} pages in ${Math.round(sustainedTime)}ms (PPM: ${ppm})`);
+        benchmarkLogToTerminal(`Sustained test: ${totalPages} pages in ${Math.round(sustainedTime)}ms (PPM: ${ppm})`);
 
-        logToTerminal('Benchmark complete!');
+        benchmarkLogToTerminal('Benchmark complete!');
         document.getElementById('copy-results-btn').classList.remove('hidden');
     } catch (error) {
-        logToTerminal(`Error during benchmark: ${error.message}`, 'error');
+        benchmarkLogToTerminal(`Error during benchmark: ${error.message}`, 'error');
         console.error(error);
     } finally {
         runBtn.disabled = false;

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiteDoc Optimizer Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px; }
+        .best-score { font-size: 2em; color: #58a6ff; font-weight: bold; }
+        pre { background: #0d1117; padding: 10px; border-radius: 4px; overflow-x: auto; color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LiteDoc Training Pipeline</h1>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Pipeline Status</h2>
+                <div class="best-score" id="currentGen" style="color: #3fb950;">Gen --</div>
+                <p>Absolute Best Generation: <span id="bestGen">--</span> (<span id="bestScore">--%</span>)</p>
+            </div>
+            <div class="card">
+                <h2>Optimal Parameters</h2>
+                <pre id="bestParams">Loading...</pre>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <h2>Optimization History</h2>
+            <canvas id="scoreChart"></canvas>
+        </div>
+        
+        <div class="card" style="margin-top: 20px;">
+            <h2>Parameter Evolution (OCR)</h2>
+            <canvas id="paramChart"></canvas>
+        </div>
+        
+        <div class="card" style="margin-top: 20px;">
+            <h2>OCR Sub-Scores Over Generations</h2>
+            <canvas id="ocrSubscoreChart"></canvas>
+        </div>
+        
+        <div class="grid" style="margin-top: 20px;">
+            <div class="card">
+                <h2>Category Breakdown (Current Best)</h2>
+                <canvas id="breakdownChart"></canvas>
+            </div>
+            <div class="card">
+                <h2>Crash Rate (Current Gen)</h2>
+                <canvas id="crashChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastDataLength = 0;
+
+        async function loadData() {
+            try {
+                const response = await fetch('data.json?t=' + Date.now(), { cache: "no-store" });
+                const data = await response.json();
+                
+                if (!data || data.length === 0) return;
+                
+                // Only update the UI if we actually have new trials
+                if (data.length === lastDataLength) return;
+                lastDataLength = data.length;
+                
+                // Find best
+                let best = data[0];
+                for (let d of data) {
+                    if (d.score > best.score) best = d;
+                }
+                
+                document.getElementById('currentGen').innerText = 'Gen ' + data[data.length - 1].generation;
+                document.getElementById('bestScore').innerText = (best.score * 100).toFixed(2) + '%';
+                document.getElementById('bestGen').innerText = best.generation;
+                document.getElementById('bestParams').innerText = JSON.stringify(best.params, null, 2);
+                
+                renderHistoryChart(data);
+                renderParamChart(data);
+                renderOcrChart(data);
+                renderBreakdownChart(best.breakdown);
+                renderCrashChart(data[data.length - 1].breakdown);
+                
+            } catch (e) {
+                console.error("Failed to load data.json", e);
+            }
+        }
+        
+        let historyChart = null;
+        function renderHistoryChart(data) {
+            const ctx = document.getElementById('scoreChart').getContext('2d');
+            if (historyChart) historyChart.destroy();
+            
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => `Gen ${d.generation}`),
+                    datasets: [
+                        {
+                            label: 'Native Text Score',
+                            data: data.map(d => {
+                                const b = d.breakdown;
+                                const total = (b.Academic?.score||0) + (b.Book?.score||0) + (b.Notebook?.score||0) + (b.Magazine?.score||0);
+                                const count = (b.Academic?.count>0?1:0) + (b.Book?.count>0?1:0) + (b.Notebook?.count>0?1:0) + (b.Magazine?.count>0?1:0);
+                                return count > 0 ? (total / count) * 100 : 0;
+                            }),
+                            borderColor: '#58a6ff',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'OCR Score (Cursed)',
+                            data: data.map(d => (d.breakdown.Cursed?.score || 0) * 100),
+                            borderColor: '#ff7b72',
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: { scales: { y: { min: 0, max: 100 } } }
+            });
+        }
+
+        let paramChart = null;
+        function renderParamChart(data) {
+            const ctx = document.getElementById('paramChart').getContext('2d');
+            if (paramChart) paramChart.destroy();
+            
+            paramChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => `Gen ${d.generation}`),
+                    datasets: [
+                        {
+                            label: 'gapMultiplier',
+                            data: data.map(d => d.params.gapMultiplier || 0),
+                            borderColor: '#d2a8ff',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'ocrTolMultiplier',
+                            data: data.map(d => d.params.ocrTolMultiplier || 0),
+                            borderColor: '#79c0ff',
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: { scales: { y: { min: 0 } } }
+            });
+        }
+
+        let ocrChart = null;
+        function renderOcrChart(data) {
+            const ctx = document.getElementById('ocrSubscoreChart').getContext('2d');
+            if (ocrChart) ocrChart.destroy();
+            
+            ocrChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => `Gen ${d.generation}`),
+                    datasets: [
+                        {
+                            label: 'Prose (Scanned)',
+                            data: data.map(d => (d.breakdown.Scanned?.prose || 0) * 100),
+                            borderColor: '#3fb950',
+                            tension: 0.1, fill: false
+                        },
+                        {
+                            label: 'Table (Scanned)',
+                            data: data.map(d => (d.breakdown.Scanned?.tables || 0) * 100),
+                            borderColor: '#d2a8ff',
+                            tension: 0.1, fill: false
+                        },
+                        {
+                            label: 'RTL (Cursed)',
+                            data: data.map(d => (d.breakdown.Cursed?.rtl || 0) * 100),
+                            borderColor: '#f0883e',
+                            tension: 0.1, fill: false
+                        },
+                        {
+                            label: 'Math (Cursed)',
+                            data: data.map(d => (d.breakdown.Cursed?.math || 0) * 100),
+                            borderColor: '#79c0ff',
+                            tension: 0.1, fill: false
+                        }
+                    ]
+                },
+                options: { scales: { y: { min: 0, max: 100 } } }
+            });
+        }
+
+        let crashChart = null;
+        function renderCrashChart(breakdown) {
+            const ctx = document.getElementById('crashChart').getContext('2d');
+            if (crashChart) crashChart.destroy();
+            
+            const labels = Object.keys(breakdown);
+            const values = labels.map(cat => breakdown[cat].crashes || 0);
+            
+            crashChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Timeouts / Crashes',
+                        data: values,
+                        backgroundColor: '#ff7b72'
+                    }]
+                },
+                options: { scales: { y: { min: 0, ticks: { stepSize: 1 } } } }
+            });
+        }
+
+        let breakdownChart = null;
+        function renderBreakdownChart(breakdown) {
+            const ctx = document.getElementById('breakdownChart').getContext('2d');
+            if (breakdownChart) breakdownChart.destroy();
+            
+            const labels = Object.keys(breakdown);
+            const values = Object.values(breakdown).map(v => v.score * 100);
+            
+            breakdownChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Category Score',
+                        data: values,
+                        backgroundColor: ['#ff7b72', '#79c0ff', '#d2a8ff', '#a5d6ff', '#8b949e']
+                    }]
+                },
+                options: { scales: { y: { min: 0, max: 100 } } }
+            });
+        }
+
+        loadData();
+        setInterval(loadData, 5000); // Auto-refresh every 5s
+    </script>
+</body>
+</html>

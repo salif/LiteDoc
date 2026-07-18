@@ -169,19 +169,24 @@ var LiteDocCore = (function () {
 
     // headings
     function classifyHeadings(allLines) {
-        // get sizes
-        const sizes = allLines
+        // Sizes are weighted by text length so a dense table of small type (many
+        // short "lines") can't drag the body-text median toward its font size.
+        const weighted = allLines
             .filter(l => l.text && l.fontSize > 0)
-            .map(l => l.fontSize);
-        if (!sizes.length) return {};
+            .map(l => ({ fs: l.fontSize, w: l.text.replace(/\s+/g, '').length }))
+            .filter(e => e.w > 0);
+        if (!weighted.length) return {};
 
-        const sorted = [...sizes].sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)];
-        const p85 = sorted[Math.floor(sorted.length * 0.85)];
-        const p95 = sorted[Math.floor(sorted.length * 0.95)];
+        weighted.sort((a, b) => a.fs - b.fs);
+        const total = weighted.reduce((s, e) => s + e.w, 0);
+        const pick = (q) => {
+            let acc = 0;
+            for (const e of weighted) { acc += e.w; if (acc >= total * q) return e.fs; }
+            return weighted[weighted.length - 1].fs;
+        };
 
         // 0=body, 1=h3, 2=h2, 3=h1
-        return { median, p85, p95 };
+        return { median: pick(0.5), p85: pick(0.85), p95: pick(0.95) };
     }
 
     function headingLevel(fontSize, thresholds, isBold) {
@@ -482,7 +487,10 @@ var LiteDocCore = (function () {
         const lines = [];
         for (const item of allItems) {
             const lastLine = lines[lines.length - 1];
-            const tol = Math.max(3, (item.height || 10) * 0.45);
+            const baseOcrTol = (typeof activeConfig !== 'undefined' && activeConfig.ocrTolMultiplier) ? activeConfig.ocrTolMultiplier : 4.0;
+            const ocrTolMultiplier = item.isOcr ? baseOcrTol : 1.0;
+            const rowSplitMultiplier = (typeof activeConfig !== 'undefined' && activeConfig.rowSplitMultiplier) ? activeConfig.rowSplitMultiplier : 3.0;
+            const tol = Math.max(3, (item.height || 10) * (rowSplitMultiplier / 6.6)) * ocrTolMultiplier;
             if (lastLine && Math.abs(item.y - (lastLine.lastY || lastLine.y)) <= tol) {
                 lastLine.items.push(item);
                 lastLine.lastY = item.y;
@@ -504,7 +512,8 @@ var LiteDocCore = (function () {
             let currentCell = null;
 
             for (const item of sortedItems) {
-                const cellGapThreshold = (item.height || 10) * 0.8;
+                const gapMultiplier = (typeof activeConfig !== 'undefined' && activeConfig.gapMultiplier) ? activeConfig.gapMultiplier : 1.0;
+                const cellGapThreshold = (item.height || 10) * gapMultiplier;
                 const gap = currentCell ? (item.x - currentCell.xMax) : Infinity;
 
                 if (currentCell && gap < cellGapThreshold) {
@@ -528,11 +537,13 @@ var LiteDocCore = (function () {
             if (isTableRow) {
                 currentBlock.push(line);
             } else {
-                if (currentBlock.length >= 2) tableBlocks.push(currentBlock);
+                if (currentBlock.length >= 3) {
+                    tableBlocks.push(currentBlock);
+                }
                 currentBlock = [];
             }
         }
-        if (currentBlock.length >= 2) tableBlocks.push(currentBlock);
+        if (currentBlock.length >= 3) tableBlocks.push(currentBlock);
 
         let md = '';
         for (const blockLines of tableBlocks) {
@@ -550,6 +561,25 @@ var LiteDocCore = (function () {
             }
             const numCols = finalCols.length;
             if (numCols < 2) continue;
+
+            // NEW: Column consistency gate
+            const colCounts = blockLines.map(l => l.cells.length);
+            const minCols = Math.min(...colCounts);
+            const maxCols = Math.max(...colCounts);
+            
+            // If the number of cells per row varies wildly, it's likely a falsely clustered paragraph.
+            if (maxCols - minCols > 2) {
+                logToTerminal(`Table detection: Skipped block, column count highly inconsistent (min: ${minCols}, max: ${maxCols})`, 'info');
+                continue;
+            }
+
+            // NEW: Vertical Alignment Gate
+            // In a real table, the distinct vertical columns (numCols) should roughly match the max cells in any row (maxCols).
+            // If numCols is much larger, it means the text is scattered (like a staggered prose paragraph) and doesn't form a grid.
+            if (numCols > maxCols + 1) {
+                logToTerminal(`Table detection: Skipped block, cells do not align vertically (numCols: ${numCols}, maxCols: ${maxCols})`, 'info');
+                continue;
+            }
 
             const grid = [];
             let overlapCount = 0;
@@ -797,6 +827,9 @@ var LiteDocCore = (function () {
                     <div class="ld-select-option" data-value="deu+eng">German + English</div>
                     <div class="ld-select-option" data-value="spa+eng">Spanish + English</div>
                     <div class="ld-select-option" data-value="chi_sim+eng">Chinese + English</div>
+                    <div class="ld-select-option" data-value="jpn+eng">Japanese + English</div>
+                    <div class="ld-select-option" data-value="kor+eng">Korean + English</div>
+                    <div class="ld-select-option" data-value="rus+eng">Russian + English</div>
                 </div>
             </div>
         </div>
@@ -1001,29 +1034,34 @@ var LiteDocCore = (function () {
     }
 
     // --- Dynamic Tuning Configuration ---
+    // The first 13 values are tuned by the Bayesian optimizer in training/ (see
+    // training/current_params.json). itemOverlapTolerance and garbageScoreThreshold
+    // are not part of the search space and keep their hand-set defaults.
     const DEFAULT_CONFIG = {
-        horizontalGapMultiplier: 1.0,
-        rowSplitMultiplier: 3.0,
-        horizontalGapMin: 12,
-        bottomMarginThreshold: 0.92,
-        topMarginThreshold: 0.08,
-        distanceFromCenterPenalty: 3.0,
-        tableDensityThreshold: 0.6,
-        pageGarbageRatioThreshold: 0.60,
-        paragraphGapThreshold: 1.8,
-        continuationGapThreshold: 1.6,
-        tableGapYThreshold: 3.5,
+        horizontalGapMultiplier: 0.7521426180831484,
+        rowSplitMultiplier: 1.6814928388059278,
+        horizontalGapMin: 9,
+        bottomMarginThreshold: 0.8325418340129557,
+        topMarginThreshold: 0.1414407581914072,
+        distanceFromCenterPenalty: 4.99632617391084,
+        tableDensityThreshold: 0.8252067528442912,
+        pageGarbageRatioThreshold: 0.83503476251094,
+        paragraphGapThreshold: 1.3893865315064922,
+        continuationGapThreshold: 2.8802907493837626,
+        tableGapYThreshold: 4.927368708674492,
+        gapMultiplier: 1.7212538907054244,
+        ocrTolMultiplier: 3.439668945857592,
         itemOverlapTolerance: 4,
         garbageScoreThreshold: 0.20
     };
 
-    let activeConfig = { ...DEFAULT_CONFIG };
+    let activeConfig$1 = { ...DEFAULT_CONFIG };
 
     /**
      * Update the active tuning parameters.
      */
     function updateTuningConfig(newConfig) {
-        activeConfig = { ...DEFAULT_CONFIG, ...newConfig };
+        activeConfig$1 = { ...DEFAULT_CONFIG, ...newConfig };
     }
 
     function segmentBox(boxItems, pageW, pageH, depth = 0) {
@@ -1051,7 +1089,7 @@ var LiteDocCore = (function () {
             // AND exclude extreme top/bottom margins
             const narrowItems = items.filter(item => {
                 if ((item.width || 0) > pageWidthApprox * 0.6) return false;
-                if (item.y < pageH * activeConfig.topMarginThreshold || item.y > pageH * activeConfig.bottomMarginThreshold) return false;
+                if (item.y < pageH * activeConfig$1.topMarginThreshold || item.y > pageH * activeConfig$1.bottomMarginThreshold) return false;
                 return true;
             });
             
@@ -1076,7 +1114,7 @@ var LiteDocCore = (function () {
             
             // Gaps between merged intervals are gutters
             const gutters = [];
-            const minGutterWidth = Math.max(activeConfig.horizontalGapMin, 1.2 * UX);
+            const minGutterWidth = Math.max(activeConfig$1.horizontalGapMin, 1.2 * UX);
             for (let i = 1; i < merged.length; i++) {
                 const gap = merged[i].start - merged[i - 1].end;
                 if (gap >= minGutterWidth) { 
@@ -1092,7 +1130,7 @@ var LiteDocCore = (function () {
                 gutters.forEach(g => {
                     const distanceFromCenterPercent = Math.abs(g.x - pageCenter) / pageWidthApprox;
                     // Scale penalty by viewport
-                    g.score = g.width - (distanceFromCenterPercent * 10 * UX * activeConfig.distanceFromCenterPenalty);
+                    g.score = g.width - (distanceFromCenterPercent * 10 * UX * activeConfig$1.distanceFromCenterPenalty);
                     
                     // Relaxed penalty for asymmetric magazine layouts (e.g. 1/3 - 2/3 splits)
                     if (distanceFromCenterPercent > 0.35) {
@@ -1123,7 +1161,7 @@ var LiteDocCore = (function () {
             for (const item of items) {
                 const last = lines[lines.length - 1];
                 // Adaptive vertical tolerance scaled by font height and rowSplitMultiplier
-                const tol = Math.max(0.3 * UY, (item.height || 10) * (activeConfig.rowSplitMultiplier / 6.6));
+                const tol = Math.max(0.3 * UY, (item.height || 10) * (activeConfig$1.rowSplitMultiplier / 6.6));
                 let isSameLine = false;
                 
                 if (last && Math.abs(item.y - last.lastY) <= tol) {
@@ -1440,9 +1478,9 @@ var LiteDocCore = (function () {
                     ctx.drawImage(img, 0, 0);
                     
                     const ocrLang = (__litedocAddons && __litedocAddons._settings.ocrLang) || 'eng';
-                    const ocrText = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang });
+                    const ocrResult = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang, ocrEnabled: true });
                     
-                    const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR) --\x3E\n\n## OCR Result\n\n${ocrText}`;
+                    const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR${ocrResult && ocrResult.isMultiRegion ? ' - Multi-Region' : ''}) --\x3E\n\n## OCR Result\n\n${ocrResult ? ocrResult.text : ''}`;
                     state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages: [], inlineRenders: {}, numPages: 1 });
                     continue fileLoop;
                 }
@@ -1619,7 +1657,7 @@ var LiteDocCore = (function () {
                                 return {
                                     str: item.str, x: e, y: f, width, height: item.height || Math.abs(a) || 12,
                                     fontSize, isBold, fontName,
-                                    garbage: score > activeConfig.garbageScoreThreshold || isMarginNoise,
+                                    garbage: score > activeConfig$1.garbageScoreThreshold || isMarginNoise,
                                     gScore: score,
                                 };
                             });
@@ -1627,7 +1665,7 @@ var LiteDocCore = (function () {
                         const items = [];
                         for (const item of rawItems) {
                             const isDup = items.some(existing => {
-                                const posMatch = Math.abs(existing.x - item.x) < activeConfig.itemOverlapTolerance && Math.abs(existing.y - item.y) < activeConfig.itemOverlapTolerance;
+                                const posMatch = Math.abs(existing.x - item.x) < activeConfig$1.itemOverlapTolerance && Math.abs(existing.y - item.y) < activeConfig$1.itemOverlapTolerance;
                                 return posMatch && existing.str.trim() === item.str.trim();
                             });
                             if (!isDup) items.push(item);
@@ -1640,15 +1678,64 @@ var LiteDocCore = (function () {
                                 const canv = document.createElement('canvas');
                                 canv.width = vp.width; canv.height = vp.height;
                                 const ctx = canv.getContext('2d');
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fillRect(0, 0, canv.width, canv.height);
                                 await page.render({ canvasContext: ctx, viewport: vp }).promise;
-                                const ocrText = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang });
-                                if (ocrText.trim()) {
-                                    mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrText;
+                                const ocrResult = await __litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang, ocrEnabled: true });
+                                
+                                if (ocrResult && ocrResult.words && ocrResult.words.length > 0) {
+                                    const pageH_ocr = canv.height;
+                                    // Need to scale coordinates back to page.view dimensions!
+                                    // Since we rendered at scale: 2.0, OCR coordinates are 2x the standard PDF coordinates!
+                                    // Tesseract word bboxes vary with ascenders/descenders, so bbox centres of
+                                    // words on one visual line spread by several px; the line grouper needs one
+                                    // shared y per line or it tears lines into interleaved fragments.
+                                    const ocrWords = ocrResult.words.filter(w => w.bbox && w.text && w.text.trim());
+                                    ocrWords.sort((a, b) => ((a.bbox.y0 + a.bbox.y1) - (b.bbox.y0 + b.bbox.y1)) || (a.bbox.x0 - b.bbox.x0));
+                                    const ocrBands = [];
+                                    for (const w of ocrWords) {
+                                        const mid = (w.bbox.y0 + w.bbox.y1) / 2;
+                                        const h = w.bbox.y1 - w.bbox.y0;
+                                        const band = ocrBands[ocrBands.length - 1];
+                                        if (band && Math.abs(mid - band.midSum / band.words.length) < 0.6 * Math.max(band.hSum / band.words.length, h)) {
+                                            band.words.push(w);
+                                            band.midSum += mid;
+                                            band.hSum += h;
+                                            band.hMax = Math.max(band.hMax, h);
+                                        } else {
+                                            ocrBands.push({ words: [w], midSum: mid, hSum: h, hMax: h });
+                                        }
+                                    }
+                                    for (const band of ocrBands) {
+                                        const bandY = (pageH_ocr - band.midSum / band.words.length) / 2.0;
+                                        const bandH = (band.hSum / band.words.length) / 2.0;
+                                        for (const w of band.words) {
+                                            items.push({
+                                                str: w.text,
+                                                x: w.bbox.x0 / 2.0,
+                                                y: bandY,
+                                                width: (w.bbox.x1 - w.bbox.x0) / 2.0,
+                                                height: bandH,
+                                                fontSize: band.hMax / 2.0,
+                                                isBold: false,
+                                                fontName: w.font_name || 'OCR_Font',
+                                                garbage: false,
+                                                gScore: 0,
+                                                isOcr: true
+                                            });
+                                        }
+                                    }
+                                } else if (ocrResult && ocrResult.text && ocrResult.text.trim()) {
+                                    mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrResult.text;
+                                    page.cleanup();
+                                    continue;
+                                } else {
                                     page.cleanup();
                                     continue;
                                 }
+                            } else {
+                                page.cleanup(); continue;
                             }
-                            page.cleanup(); continue;
                         }
 
                         function groupItemsIntoLines(itemList) {
@@ -1656,7 +1743,8 @@ var LiteDocCore = (function () {
                             const lines = [];
                             for (const item of itemList) {
                                 const last = lines[lines.length - 1];
-                                const tol = Math.max(3, (item.height || 10) * (activeConfig.rowSplitMultiplier / 6.6));
+                                const ocrTolMultiplier = item.isOcr ? (activeConfig$1.ocrTolMultiplier ?? 4.0) : 1.0;
+                                const tol = Math.max(3, (item.height || 10) * (activeConfig$1.rowSplitMultiplier / 6.6)) * ocrTolMultiplier;
                                 let isSameLine = false;
                                 if (last && Math.abs(item.y - last.lastY) <= tol) {
                                     const gap = item.x - last.xMax;
@@ -1677,12 +1765,12 @@ var LiteDocCore = (function () {
                             for (const lg of lines) {
                                 const lineStr = lg.items.map(it => it.str).join('');
                                 const rawNoSpace = lg.items.map(it => it.str).join('').replace(/\s+/g, '');
-                                const isMargin = lg.y > pageH * activeConfig.bottomMarginThreshold || lg.y < pageH * activeConfig.topMarginThreshold;
+                                const isMargin = lg.y > pageH * activeConfig$1.bottomMarginThreshold || lg.y < pageH * activeConfig$1.topMarginThreshold;
                                 if ((repeatingFPs.has(rawNoSpace) && isMargin) || (/^\d+$/.test(rawNoSpace) && isMargin)) {
                                     lg.garbage = true; lg.items.forEach(it => it.garbage = true);
                                 }
-                                lg.text = joinLineItems(lg.items.filter(it => !it.garbage), activeConfig);
-                                lg.rawText = joinLineItems(lg.items, activeConfig);
+                                lg.text = joinLineItems(lg.items.filter(it => !it.garbage), activeConfig$1);
+                                lg.rawText = joinLineItems(lg.items, activeConfig$1);
                             }
                             return lines;
                         }
@@ -1701,7 +1789,7 @@ var LiteDocCore = (function () {
                             parsedLines.forEach(l => {
                                 l.blockIdx = blockIdx;
                                 const lineStr = l.items.map(it => it.str).join('');
-                                l.text = joinLineItems(l.items, activeConfig);
+                                l.text = joinLineItems(l.items, activeConfig$1);
                             });
                             allLineGroups.push(...parsedLines);
                         }
@@ -1709,12 +1797,14 @@ var LiteDocCore = (function () {
                         const activeLines = allLineGroups.filter(l => !l.isTable && (l.rawText || '').trim().length > 0);
                         const totalLines = activeLines.length;
                         const garbageLines = activeLines.filter(l => l.garbage).length;
-                        if (totalLines > 0 && (garbageLines / totalLines) > activeConfig.pageGarbageRatioThreshold) {
+                        if (totalLines > 0 && (garbageLines / totalLines) > activeConfig$1.pageGarbageRatioThreshold) {
                             page.cleanup(); continue;
                         }
 
                         const medH = allLineGroups.map(l => l.height).sort((a,b) => a-b)[Math.floor(allLineGroups.length/2)] || 12;
                         const hThresh = classifyHeadings(allLineGroups);
+                        console.log('[DBG] hThresh', JSON.stringify(hThresh), 'medH', medH);
+                        for (const l of allLineGroups) console.log('[DBG] line fs=' + l.fontSize + ' h=' + l.height + ' g=' + !!l.garbage + ' :: ' + (l.text || '').slice(0, 60));
 
                         function linesToMd(lines) {
                             const mdArr = [];
@@ -1726,6 +1816,36 @@ var LiteDocCore = (function () {
                                     if (tableBuffer.length === 1) mdArr.push(tableBuffer[0].join(' '));
                                     tableBuffer = []; tableColsBounds = []; return;
                                 }
+                                
+                                let filledCells = 0;
+                                const totalCells = tableBuffer.length * tableColsBounds.length;
+                                for (let r = 0; r < tableBuffer.length; r++) {
+                                    for (let c = 0; c < tableBuffer[r].length; c++) {
+                                        if (tableBuffer[r][c].trim() !== '') filledCells++;
+                                    }
+                                }
+                                
+                                if (totalCells > 0 && (filledCells / totalCells) < activeConfig$1.tableDensityThreshold) {
+                                    for (let i = 0; i < tableBuffer.length; i++) {
+                                        const rowText = tableBuffer[i].filter(x => x.trim()).join(' ');
+                                        if (rowText) mdArr.push(rowText);
+                                    }
+                                    tableBuffer = []; tableColsBounds = []; return;
+                                }
+
+                                const colCounts = tableBuffer.map(row => row.filter(cell => cell.trim() !== '').length);
+                                const minCols = Math.min(...colCounts);
+                                const maxCols = Math.max(...colCounts);
+                                
+                                // Consistency gate for fallback parser
+                                if (maxCols - minCols > 2 || maxCols <= 1) {
+                                    for (const row of tableBuffer) {
+                                        const text = row.filter(c => c.trim()).join(' ').trim();
+                                        if (text) mdArr.push(text);
+                                    }
+                                    tableBuffer = []; tableColsBounds = []; return;
+                                }
+
                                 mdArr.push('| ' + tableBuffer[0].join(' | ') + ' |');
                                 mdArr.push('|' + Array(tableBuffer[0].length).fill('---').join('|') + '|');
                                 for (let i = 1; i < tableBuffer.length; i++) mdArr.push('| ' + tableBuffer[i].join(' | ') + ' |');
@@ -1743,7 +1863,7 @@ var LiteDocCore = (function () {
                                     if (i > 0) {
                                         const prev = sortedItems[i - 1];
                                         const gap = curr.x - (prev.x + (prev.width || 0));
-                                        if (gap > Math.max(activeConfig.horizontalGapMin, (curr.height || 10) * activeConfig.horizontalGapMultiplier)) {
+                                        if (gap > Math.max(activeConfig$1.horizontalGapMin, (curr.height || 10) * activeConfig$1.horizontalGapMultiplier)) {
                                             cols.push(curCol); curCol = []; hasHugeGap = true;
                                         }
                                     }
@@ -1761,7 +1881,7 @@ var LiteDocCore = (function () {
 
                                 let belongsToTable = false, rowCells = [];
                                 if (tableColsBounds.length > 0 && !looksLikeColumns) {
-                                    if (prevY !== null && (prevY - lg.y) > medH * activeConfig.tableGapYThreshold) flushTable();
+                                    if (prevY !== null && (prevY - lg.y) > medH * activeConfig$1.tableGapYThreshold) flushTable();
                                     else {
                                         rowCells = Array(tableColsBounds.length).fill('');
                                         for (let it of sortedItems) {
@@ -1777,7 +1897,7 @@ var LiteDocCore = (function () {
                                 }
                                 if (!belongsToTable && hasHugeGap && cols.length > 1 && !looksLikeColumns) {
                                     tableColsBounds = cols.map(c => ({ min: c[0].x, max: c[c.length - 1].x + (c[c.length - 1].width || 0) }));
-                                    rowCells = cols.map(c => joinLineItems(c, activeConfig));
+                                    rowCells = cols.map(c => joinLineItems(c, activeConfig$1));
                                     belongsToTable = true;
                                 }
 
@@ -1791,8 +1911,8 @@ var LiteDocCore = (function () {
                                     if (level > 0) { flushPara(); mdArr.push('#'.repeat(4-level) + ' ' + txt); }
                                     else {
                                         const gap = prevY !== null ? (prevY - lg.y) : 0;
-                                        if (gap > medH * activeConfig.paragraphGapThreshold) flushPara();
-                                        if (prevLine && Math.abs(lg.fontSize - prevLine.fontSize) < 0.6 && gap < medH * activeConfig.continuationGapThreshold) paragraphBuf += (paragraphBuf.endsWith('-') ? '' : ' ') + txt;
+                                        if (gap > medH * activeConfig$1.paragraphGapThreshold) flushPara();
+                                        if (prevLine && Math.abs(lg.fontSize - prevLine.fontSize) < 0.6 && gap < medH * activeConfig$1.continuationGapThreshold) paragraphBuf += (paragraphBuf.endsWith('-') ? '' : ' ') + txt;
                                         else paragraphBuf = txt;
                                     }
                                 }

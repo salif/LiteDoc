@@ -60,11 +60,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
     <!-- tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="vendor/tailwindcss.js"></script>
 
     <!-- libs -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Local Dependencies -->
+    <script src="vendor/pdf.min.js"></script>
+    <script src="vendor/jszip.min.js"></script>
 
     <!-- katex -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -88,7 +89,7 @@
 
     <!-- FOUC Preloader / Splash Screen -->
     <div id="app-preloader" style="position:fixed; inset:0; background:var(--bg-app, #0f1115); z-index:99999; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity 0.4s ease, visibility 0.4s ease;">
-        <div style="font-family:'Comic Sans MS','Comic Sans',cursive; font-size:2rem; font-weight:700; color:#ffffff; letter-spacing:-0.01em; margin-bottom:20px;">
+        <div style="font-family:'Plus Jakarta Sans', sans-serif; font-size:2rem; font-weight:700; color:#ffffff; letter-spacing:-0.01em; margin-bottom:20px;">
             litedoc<span style="color:#6366f1">.xyz</span>
         </div>
         <div style="width:24px; height:24px; border:3px solid rgba(99,102,241,0.2); border-top-color:#6366f1; border-radius:50%; animation:spin 1s linear infinite;"></div>
@@ -102,7 +103,7 @@
             <div class="flex-1 flex items-center">
                 <a href="#" class="brand-logo" style="text-decoration:none;display:flex;align-items:center;gap:6px;flex-shrink:0">
                     <span
-                        style="font-family:'Comic Sans MS','Comic Sans',cursive;font-size:1.1rem;font-weight:700;color:var(--text-1);letter-spacing:-0.01em">litedoc<span
+                        style="font-family:'Plus Jakarta Sans', sans-serif;font-size:1.1rem;font-weight:700;color:var(--text-1);letter-spacing:-0.01em">litedoc<span
                             class="brand-accent" style="color:var(--accent)">.xyz</span></span>
                 </a>
             </div>
@@ -114,19 +115,19 @@
                         style="background:var(--accent-hi)"></span>
                     <span class="relative inline-flex rounded-full h-1.5 w-1.5" style="background:var(--accent)"></span>
                 </span>
-                <span style="color:var(--text-2)">Version 2.6.0</span>
+                <span style="color:var(--text-2)">Version 3.0.0</span>
             </div>
 
             <!-- right controls -->
             <div class="flex-1 flex items-center justify-end gap-3">
                 <button id="install-pwa-btn" onclick="installPWA()"
-                    class="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-all text-[color:var(--accent)] hover:text-white hover:bg-[color:var(--accent)] border border-[color:var(--accent-low)]"
+                    class="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-all text-[color:var(--accent)] hover:text-white hover:bg-[color:var(--accent)] border border-[color:var(--accent-low)] whitespace-nowrap"
                     title="Install App">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     <span class="hidden sm:inline">Install App</span>
                 </button>
                 <a href="https://github.com/0xovo/LiteDoc" target="_blank"
-                    class="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-all hover:bg-[var(--accent-low)] text-[color:var(--text-3)] hover:text-[color:var(--accent-hi)] border border-transparent hover:border-[var(--border-hi)]"
+                    class="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-all hover:bg-[var(--accent-low)] text-[color:var(--text-3)] hover:text-[color:var(--accent-hi)] border border-transparent hover:border-[var(--border-hi)] whitespace-nowrap"
                     title="Star LiteDoc on GitHub">
                     <svg class="w-4 h-4" width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
                         <path fill-rule="evenodd"
@@ -159,6 +160,7 @@
     <!-- main -->
     <main class="flex-1 w-full flex flex-col gap-6">
 
+        <div id="app-view" class="w-full flex flex-col gap-6">
         <!-- wrapper -->
         <div class="max-w-6xl w-full mx-auto px-4 sm:px-8 pb-8 flex flex-col gap-6 mt-4 sm:mt-6">
 
@@ -210,7 +212,7 @@
                             Built by 0xovo
                             <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full"
                                 style="background:var(--accent-low);color:var(--accent-hi)">Creator</span>
-                            <a href="https://github.com/0xovo/LiteDoc/blob/main/index.html" target="_blank"
+                            <a href="https://github.com/0xovo/LiteDoc/blob/main/src/index.html" target="_blank"
                                 class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"
                                 style="background:rgba(16, 185, 129, 0.1);color:var(--success);border:1px solid rgba(16, 185, 129, 0.25);text-decoration:none"
                                 onmouseover="this.style.background='rgba(16, 185, 129, 0.2)'"
@@ -945,6 +947,52 @@
 
         </div>
     </div><!-- /wrapper -->
+    </div><!-- /app-view -->
+
+    <!-- benchmark-view -->
+    <div id="benchmark-view" class="hidden max-w-4xl w-full mx-auto px-4 sm:px-8 py-6 flex flex-col gap-6">
+        <header class="mb-2 flex justify-between items-center gap-2">
+            <h1 class="text-2xl sm:text-3xl font-bold">Hardware Benchmark</h1>
+            <button onclick="window.toggleBenchmarkView()" class="text-indigo-400 hover:text-indigo-300 text-sm sm:text-base font-semibold">← Back to App</button>
+        </header>
+
+        <div class="card p-5 sm:p-8 mb-4">
+            <p class="mb-4 text-sm sm:text-base" style="color:var(--text-2)">Measure LiteDoc's performance on your current hardware. This tests engine spin-up, burst processing (PPT), and sustained throughput (PPM).</p>
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+                <button id="run-benchmark-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 sm:py-2 px-6 rounded-lg transition-colors w-full sm:w-auto">
+                    Start Benchmarking
+                </button>
+                <button id="copy-results-btn" class="hidden bg-[var(--bg-input)] border border-[var(--border)] hover:bg-[var(--bg-hover)] text-white font-bold py-3 sm:py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 w-full sm:w-auto">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    Copy Results
+                </button>
+            </div>
+        </div>
+
+        <div id="results-card" class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+            <div class="card p-5 sm:p-8 flex flex-col items-center justify-center text-center">
+                <span class="text-gray-400 text-xs sm:text-sm mb-2 uppercase tracking-wider">Engine Spin-Up</span>
+                <span id="spin-up-time" class="text-3xl sm:text-4xl font-bold metric-value" style="font-family:'Plus Jakarta Sans', sans-serif">0ms</span>
+                <span class="text-xs text-gray-500 mt-2">Time to initialize workers</span>
+            </div>
+            <div class="card p-5 sm:p-8 flex flex-col items-center justify-center text-center">
+                <span class="text-gray-400 text-xs sm:text-sm mb-2 uppercase tracking-wider">PPT (Burst)</span>
+                <span id="ppt-metric" class="text-3xl sm:text-4xl font-bold metric-value" style="font-family:'Plus Jakarta Sans', sans-serif">0</span>
+                <span class="text-xs text-gray-500 mt-2">Pages Per Toast (Synthetic)</span>
+            </div>
+            <div class="card p-5 sm:p-8 flex flex-col items-center justify-center text-center">
+                <span class="text-gray-400 text-xs sm:text-sm mb-2 uppercase tracking-wider">PPM (Sustained)</span>
+                <span id="ppm-metric" class="text-3xl sm:text-4xl font-bold metric-value" style="font-family:'Plus Jakarta Sans', sans-serif">0</span>
+                <span class="text-xs text-gray-500 mt-2">Pages Per Minute</span>
+            </div>
+        </div>
+
+        <div id="log-card" class="card p-5 sm:p-8 mt-4 hidden">
+            <h2 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Benchmark Log</h2>
+            <div id="benchmark-log" class="font-mono text-xs sm:text-sm text-gray-300 space-y-1 max-h-48 sm:max-h-60 overflow-y-auto">
+            </div>
+        </div>
+    </div><!-- /benchmark-view -->
 
     </main>
 
@@ -960,7 +1008,7 @@
                 <div class="flex items-center justify-center md:justify-start gap-3 mt-2 text-xs font-medium">
                     <a href="mailto:contact@litedoc.xyz" class="transition-colors hover:text-[var(--accent)]" style="color:var(--text-2)">Contact</a>
                     <span style="color:var(--border)">|</span>
-                    <a href="benchmark.html" class="transition-colors hover:text-[var(--accent)]" style="color:var(--text-2)">Hardware Benchmark</a>
+                    <a href="javascript:void(0)" onclick="window.toggleBenchmarkView()" class="transition-colors hover:text-[var(--accent)]" style="color:var(--text-2)">Hardware Benchmark</a>
                 </div>
 
                 <p class="text-[10px] mt-4 flex items-center justify-center md:justify-start gap-2" style="color:var(--text-3)">
@@ -987,18 +1035,19 @@
                 <div id="kofi-supporters-container" class="flex flex-wrap justify-center md:justify-end gap-2 mt-1">
                     <span class="text-[11px] px-2 py-1 rounded-md transition-colors hover:border-[var(--accent)] cursor-default" style="background:var(--bg-input); border:1px solid var(--border); color:var(--text-2)">Harish Pillay</span>
                     <span class="text-[11px] px-2 py-1 rounded-md transition-colors hover:border-[var(--accent)] cursor-default" style="background:var(--bg-input); border:1px solid var(--border); color:var(--text-2)">ABK</span>
-                    <span class="text-[11px] px-2 py-1 rounded-md transition-colors hover:border-[var(--accent)] cursor-default" style="background:var(--bg-input); border:1px solid var(--border); color:var(--text-2)">4x Supporters ☕</span>
+                    <span class="text-[11px] px-2 py-1 rounded-md transition-colors hover:border-[var(--accent)] cursor-default" style="background:var(--bg-input); border:1px solid var(--border); color:var(--text-2)">6x Supporters ☕</span>
                 </div>
 
                 <!-- Hall of Fame -->
                 <div class="mt-3 w-full max-w-[280px] space-y-2">
                     <div class="text-[10px] p-2 rounded-lg border" style="background:linear-gradient(135deg, rgba(255,94,91,0.08), rgba(255,94,91,0.02)); border-color:rgba(255,94,91,0.15); color:var(--text-2)">
                         <span class="font-semibold" style="color:var(--accent)">⭐ Hall of Fame</span>
-                        <p class="mt-1 italic leading-relaxed">"very helpful for independent students / study!"</p>
-                        <p class="mt-0.5 text-[9px]" style="color:var(--text-3)">— Supporter · 3 days ago</p>
+                        <p class="mt-1 italic leading-relaxed">"Great program, love that there is a GUI to work with."</p>
+                        <p class="mt-0.5 text-[9px]" style="color:var(--text-3)">— Anonymous · 13 days ago</p>
                     </div>
+                    
                     <p class="text-[10px] text-center" style="color:var(--text-3)">
-                        Thank you for your generous donation ❤️
+                        Thank you for your generous donations ❤️
                     </p>
                 </div>
 
@@ -1231,8 +1280,8 @@
     <script src="js/ocr.js"></script>
     <script src="js/geometry.js"></script>
     <script src="js/litedoc-core.js"></script>
+    <script src="js/benchmark.js"></script>
     <script src="js/main.js"></script>
-
 </body>
 
 </html>

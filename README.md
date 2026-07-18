@@ -68,7 +68,7 @@ No dependencies, no server uploads, no privacy concerns. It runs entirely on you
 | Feature | Description |
 |---|---|
 | **Layout Analysis** | Kahn's Topological Sort on a DAG of geometric blocks determines correct reading order across sidebars, headers, and multi-column page layouts — no horizontal text mixing. |
-| **Table Extraction** | Vector line detection builds GitHub-Flavored Markdown tables with merged cell support. |
+| **Table Extraction** | Vector line detection builds GitHub-Flavored Markdown tables with merged cell support. Extraction heuristics are tuned via Bayesian Optimization (Optuna) against synthetic layout edge-case simulations. |
 | **Math Rendering** | Detects formula bounding boxes (including PUA-encoded symbols) and preserves them as high-fidelity images or KaTeX. |
 | **Gibberish Detection** | Statistical scoring identifies corrupted custom-encoded fonts and routes them to OCR fallback. |
 
@@ -85,10 +85,18 @@ No dependencies, no server uploads, no privacy concerns. It runs entirely on you
 | Feature | Description |
 |---|---|
 | **RTL & Arabic** | Native right-to-left script support with automatic line alignment and typography routing. |
-| **Smart OCR Routing** | Scans initial pages for corruption; auto-detects script direction and language, initializing Tesseract.js workers on demand. |
+| **Smart OCR Routing** | Scans initial pages for corruption; auto-detects script direction and language, initializing Tesseract.js workers with dynamically tuned PSM modes and vertical tolerances for maximum stability. |
 | **Font Fallback** | Corrupted or custom-encoded fonts intercepted with image-fallback options for readability. |
 | **Mobile Responsive** | Full editor, document navigation, and settings available on any screen size. |
 | **Queue Control** | Pause or skip processing tasks. "Unformat" action strips markdown styling instantly. |
+
+### New: Optional AI Cleanup
+
+LiteDoc now ships an opt-in **"Clean with AI"** feature: after the local parser extracts your document, an AI pass can fix leftover typos and OCR artifacts, stitch sentences broken across lines and pages, and re-align mangled tables into proper Markdown.
+
+- **Still 100% local by default** — the AI pass is the *only* feature that talks to a server, and only for the document you explicitly send. Everything else stays in your browser, same as always.
+- **Private by design** — documents are processed in memory and never written to disk, stored, or logged. Accounts are username + password only; we never ask for an email.
+- **How it's funded** — AI cleanup runs on tokens purchased as gift codes from the [Ko-fi shop](https://ko-fi.com/0xovo/shop). This add-on exists so supporting the project isn't a one-way street: donors get something genuinely useful back, and every purchase keeps the servers running.
 
 ## Getting Started
 
@@ -111,6 +119,26 @@ If you want to modify the source code:
  python scripts/build.py
  ```
 3. The compiled production bundle will be updated at `dist/index.html`.
+
+### Release Workflow (Maintainers)
+When cutting a new release for GitHub, follow this exact strict checklist to ensure no sensitive data leaks:
+1. Tag a new commit with `vX.Y.Z`.
+2. Run the build script with the version stamp:
+   ```bash
+   python scripts/build.py --version=X.Y.Z
+   ```
+3. Run the security check script. It will scan the generated `index.html` for any leaked secrets (API keys, dev backend URLs, etc.):
+   ```bash
+   ./scripts/pre_publish_check.sh
+   ```
+4. Only if the check passes (`✅ No obvious secrets...`), attach the resulting `dist/index.html` to a GitHub Release for that tag.
+
+### Training & Heuristic Optimization
+LiteDoc's parser is driven by a set of layout, table, and OCR heuristics (column proximity, alignment tolerances, math detection margins, and more). Those parameters are no longer hand-tuned — this repository ships the complete, open-source **Synthetic Dataset Training Pipeline** that tunes them automatically.
+
+The pipeline procedurally generates diverse PDFs with matching ground-truth Markdown (using rendering backends like Typst, WeasyPrint, and LaTeX), degrades some of them to simulate low-quality scans, then runs continuous headless Bayesian optimization (Optuna) that scores the real parser in headless Chromium against the ground truth — including reading order, table structure, and word order.
+
+Want to dig deeper — or train the parser on your own PDF edge cases? Everything lives in the [`training/`](training/) folder: the dataset generator, the scoring functions, the optimizer, and a live training dashboard, with step-by-step setup instructions in the [Training Pipeline README](training/README.md).
 
 ### Extracting Files
 Once processing finishes, you can preview the generated Markdown directly in the built-in Ace Editor.

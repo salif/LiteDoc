@@ -3,18 +3,23 @@ import * as utils from '../utils/utils.js';
 import { topologicalSort, dbscan, inferFontStyle } from '../utils/geometry.js';
 
 // --- Dynamic Tuning Configuration ---
+// The first 13 values are tuned by the Bayesian optimizer in training/ (see
+// training/current_params.json). itemOverlapTolerance and garbageScoreThreshold
+// are not part of the search space and keep their hand-set defaults.
 const DEFAULT_CONFIG = {
-    horizontalGapMultiplier: 1.0,
-    rowSplitMultiplier: 3.0,
-    horizontalGapMin: 12,
-    bottomMarginThreshold: 0.92,
-    topMarginThreshold: 0.08,
-    distanceFromCenterPenalty: 3.0,
-    tableDensityThreshold: 0.6,
-    pageGarbageRatioThreshold: 0.60,
-    paragraphGapThreshold: 1.8,
-    continuationGapThreshold: 1.6,
-    tableGapYThreshold: 3.5,
+    horizontalGapMultiplier: 0.7521426180831484,
+    rowSplitMultiplier: 1.6814928388059278,
+    horizontalGapMin: 9,
+    bottomMarginThreshold: 0.8325418340129557,
+    topMarginThreshold: 0.1414407581914072,
+    distanceFromCenterPenalty: 4.99632617391084,
+    tableDensityThreshold: 0.8252067528442912,
+    pageGarbageRatioThreshold: 0.83503476251094,
+    paragraphGapThreshold: 1.3893865315064922,
+    continuationGapThreshold: 2.8802907493837626,
+    tableGapYThreshold: 4.927368708674492,
+    gapMultiplier: 1.7212538907054244,
+    ocrTolMultiplier: 3.439668945857592,
     itemOverlapTolerance: 4,
     garbageScoreThreshold: 0.20
 };
@@ -476,9 +481,9 @@ export const executePdfConversion = async function (files) {
                 ctx.drawImage(img, 0, 0);
                 
                 const ocrLang = (addons.__litedocAddons && addons.__litedocAddons._settings.ocrLang) || 'eng';
-                const ocrText = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang });
+                const ocrResult = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang, ocrEnabled: true });
                 
-                const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR) --\x3E\n\n## OCR Result\n\n${ocrText}`;
+                const mdText = `\x3C!-- Converted from ${file.name} (Direct OCR${ocrResult && ocrResult.isMultiRegion ? ' - Multi-Region' : ''}) --\x3E\n\n## OCR Result\n\n${ocrResult ? ocrResult.text : ''}`;
                 state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages: [], inlineRenders: {}, numPages: 1 });
                 continue fileLoop;
             }
@@ -676,15 +681,64 @@ export const executePdfConversion = async function (files) {
                             const canv = document.createElement('canvas');
                             canv.width = vp.width; canv.height = vp.height;
                             const ctx = canv.getContext('2d');
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, canv.width, canv.height);
                             await page.render({ canvasContext: ctx, viewport: vp }).promise;
-                            const ocrText = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang });
-                            if (ocrText.trim()) {
-                                mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrText;
+                            const ocrResult = await addons.__litedocAddons.ocrCanvas(canv, file.name, { ocrLang: docOcrLang, ocrEnabled: true });
+                            
+                            if (ocrResult && ocrResult.words && ocrResult.words.length > 0) {
+                                const pageH_ocr = canv.height;
+                                // Need to scale coordinates back to page.view dimensions!
+                                // Since we rendered at scale: 2.0, OCR coordinates are 2x the standard PDF coordinates!
+                                // Tesseract word bboxes vary with ascenders/descenders, so bbox centres of
+                                // words on one visual line spread by several px; the line grouper needs one
+                                // shared y per line or it tears lines into interleaved fragments.
+                                const ocrWords = ocrResult.words.filter(w => w.bbox && w.text && w.text.trim());
+                                ocrWords.sort((a, b) => ((a.bbox.y0 + a.bbox.y1) - (b.bbox.y0 + b.bbox.y1)) || (a.bbox.x0 - b.bbox.x0));
+                                const ocrBands = [];
+                                for (const w of ocrWords) {
+                                    const mid = (w.bbox.y0 + w.bbox.y1) / 2;
+                                    const h = w.bbox.y1 - w.bbox.y0;
+                                    const band = ocrBands[ocrBands.length - 1];
+                                    if (band && Math.abs(mid - band.midSum / band.words.length) < 0.6 * Math.max(band.hSum / band.words.length, h)) {
+                                        band.words.push(w);
+                                        band.midSum += mid;
+                                        band.hSum += h;
+                                        band.hMax = Math.max(band.hMax, h);
+                                    } else {
+                                        ocrBands.push({ words: [w], midSum: mid, hSum: h, hMax: h });
+                                    }
+                                }
+                                for (const band of ocrBands) {
+                                    const bandY = (pageH_ocr - band.midSum / band.words.length) / 2.0;
+                                    const bandH = (band.hSum / band.words.length) / 2.0;
+                                    for (const w of band.words) {
+                                        items.push({
+                                            str: w.text,
+                                            x: w.bbox.x0 / 2.0,
+                                            y: bandY,
+                                            width: (w.bbox.x1 - w.bbox.x0) / 2.0,
+                                            height: bandH,
+                                            fontSize: band.hMax / 2.0,
+                                            isBold: false,
+                                            fontName: w.font_name || 'OCR_Font',
+                                            garbage: false,
+                                            gScore: 0,
+                                            isOcr: true
+                                        });
+                                    }
+                                }
+                            } else if (ocrResult && ocrResult.text && ocrResult.text.trim()) {
+                                mdText += (pageNum > 1 ? '\n\n---\n\n' : '') + `## Page ${pageNum} (OCR)\n\n` + ocrResult.text;
+                                page.cleanup();
+                                continue;
+                            } else {
                                 page.cleanup();
                                 continue;
                             }
+                        } else {
+                            page.cleanup(); continue;
                         }
-                        page.cleanup(); continue;
                     }
 
                     function groupItemsIntoLines(itemList) {
@@ -692,7 +746,8 @@ export const executePdfConversion = async function (files) {
                         const lines = [];
                         for (const item of itemList) {
                             const last = lines[lines.length - 1];
-                            const tol = Math.max(3, (item.height || 10) * (activeConfig.rowSplitMultiplier / 6.6));
+                            const ocrTolMultiplier = item.isOcr ? (activeConfig.ocrTolMultiplier ?? 4.0) : 1.0;
+                            const tol = Math.max(3, (item.height || 10) * (activeConfig.rowSplitMultiplier / 6.6)) * ocrTolMultiplier;
                             let isSameLine = false;
                             if (last && Math.abs(item.y - last.lastY) <= tol) {
                                 const gap = item.x - last.xMax;
@@ -762,6 +817,36 @@ export const executePdfConversion = async function (files) {
                                 if (tableBuffer.length === 1) mdArr.push(tableBuffer[0].join(' '));
                                 tableBuffer = []; tableColsBounds = []; return;
                             }
+                            
+                            let filledCells = 0;
+                            const totalCells = tableBuffer.length * tableColsBounds.length;
+                            for (let r = 0; r < tableBuffer.length; r++) {
+                                for (let c = 0; c < tableBuffer[r].length; c++) {
+                                    if (tableBuffer[r][c].trim() !== '') filledCells++;
+                                }
+                            }
+                            
+                            if (totalCells > 0 && (filledCells / totalCells) < activeConfig.tableDensityThreshold) {
+                                for (let i = 0; i < tableBuffer.length; i++) {
+                                    const rowText = tableBuffer[i].filter(x => x.trim()).join(' ');
+                                    if (rowText) mdArr.push(rowText);
+                                }
+                                tableBuffer = []; tableColsBounds = []; return;
+                            }
+
+                            const colCounts = tableBuffer.map(row => row.filter(cell => cell.trim() !== '').length);
+                            const minCols = Math.min(...colCounts);
+                            const maxCols = Math.max(...colCounts);
+                            
+                            // Consistency gate for fallback parser
+                            if (maxCols - minCols > 2 || maxCols <= 1) {
+                                for (const row of tableBuffer) {
+                                    const text = row.filter(c => c.trim()).join(' ').trim();
+                                    if (text) mdArr.push(text);
+                                }
+                                tableBuffer = []; tableColsBounds = []; return;
+                            }
+
                             mdArr.push('| ' + tableBuffer[0].join(' | ') + ' |');
                             mdArr.push('|' + Array(tableBuffer[0].length).fill('---').join('|') + '|');
                             for (let i = 1; i < tableBuffer.length; i++) mdArr.push('| ' + tableBuffer[i].join(' | ') + ' |');

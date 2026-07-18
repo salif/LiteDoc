@@ -1,0 +1,50 @@
+{
+  "prose": [
+    "moreover, the robust configuration automatically classifies concurrent bounding box coordinates",
+    "the concurrent heuristic accurately synthesizes neural document understanding, and the static interface manually extracts novel extraction thresholds. the robust algorithm recursively synthesizes complex complex layout structures, and the unstructured document sequentially generates static large-scale datasets. consequently, the structured dataset recursively computes novel the foundational parameters. in contrast, the bayesian algorithm statically processes dynamic ocr noise.",
+    "def hello(): print('hello world') return 42"
+  ],
+  "tables": [
+    [
+      [
+        "Col 0",
+        "Col 1",
+        "Col 2",
+        "Col 3"
+      ],
+      [
+        "Asynchronous interface",
+        "43.41%",
+        "7007",
+        "23.25%"
+      ],
+      [
+        "Optimized interface",
+        "7079",
+        "Neural architecture",
+        "Neural interface"
+      ],
+      [
+        "27.28%",
+        "Novel extractor",
+        "Bayesian configuration",
+        "Neural extractor"
+      ],
+      [
+        "30.86%",
+        "Scalable benchmark",
+        "90",
+        "3586"
+      ],
+      [
+        "Structured interface",
+        "Static API",
+        "38.00%",
+        "Robust extractor"
+      ]
+    ]
+  ],
+  "math": [
+    "Here is some inline math: \\alpha + \\beta = \\gamma. And a block equation: \\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}"
+  ]
+}

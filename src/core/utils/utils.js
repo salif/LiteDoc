@@ -216,19 +216,24 @@ function detectColumnSplit(lines, pageWidth) {
 
 // headings
 function classifyHeadings(allLines) {
-    // get sizes
-    const sizes = allLines
+    // Sizes are weighted by text length so a dense table of small type (many
+    // short "lines") can't drag the body-text median toward its font size.
+    const weighted = allLines
         .filter(l => l.text && l.fontSize > 0)
-        .map(l => l.fontSize);
-    if (!sizes.length) return {};
+        .map(l => ({ fs: l.fontSize, w: l.text.replace(/\s+/g, '').length }))
+        .filter(e => e.w > 0);
+    if (!weighted.length) return {};
 
-    const sorted = [...sizes].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const p85 = sorted[Math.floor(sorted.length * 0.85)];
-    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+    weighted.sort((a, b) => a.fs - b.fs);
+    const total = weighted.reduce((s, e) => s + e.w, 0);
+    const pick = (q) => {
+        let acc = 0;
+        for (const e of weighted) { acc += e.w; if (acc >= total * q) return e.fs; }
+        return weighted[weighted.length - 1].fs;
+    };
 
     // 0=body, 1=h3, 2=h2, 3=h1
-    return { median, p85, p95 };
+    return { median: pick(0.5), p85: pick(0.85), p95: pick(0.95) };
 }
 
 function headingLevel(fontSize, thresholds, isBold) {

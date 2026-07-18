@@ -51,7 +51,7 @@
 
         if (window.location.protocol === 'file:') {
             console.info('[OCR] Running on file:// protocol. Using CDN for Tesseract.js.');
-            await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+            await loadScriptOnce('vendor/tesseract.min.js');
             return;
         }
 
@@ -59,7 +59,7 @@
             await loadScriptOnce('js/tesseract.min.js');
         } catch (e) {
             console.warn('[OCR] Local tesseract.min.js not found. Falling back to CDN...');
-            await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+            await loadScriptOnce('vendor/tesseract.min.js');
         }
     }
 
@@ -224,23 +224,9 @@
 
             if (!canvas) return payload;
 
-            const ctx = canvas.getContext('2d');
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            const contrast = 1.5;
-            const threshold = 128;
-
-            for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                let gray = r * 0.299 + g * 0.587 + b * 0.114;
-                gray = (gray - 128) * contrast + 128;
-                const val = gray > threshold ? 255 : 0;
-                data[i] = data[i + 1] = data[i + 2] = val;
-                data[i + 3] = 255;
-            }
-            ctx.putImageData(imageData, 0, 0);
+            // Tesseract performs better without destructive manual thresholding
+            // since its internal Leptonica engine runs an adaptive Otsu binarization.
+            // We just return the redrawn canvas.
             return canvas;
         } catch (e) {
             console.warn('[OCR] Preprocessing failed, using original payload', e);
@@ -263,6 +249,109 @@
         try {
             while (queue.length > 0) {
                 const firstTask = queue[0];
+
+                if (!firstTask.isSubTask && !firstTask.layoutAttempted) {
+                    firstTask.layoutAttempted = true;
+                    let layoutBlocks = null;
+                    const wLayout = await getIdleWorker('eng');
+                    if (!wLayout) break; // Need a worker for the layout pass
+                    
+                    wLayout.isBusy = true;
+                    wLayout.activeTaskId = firstTask.id;
+                    isProcessing = true;
+                    updateQueueUI();
+                    
+                    let originalCanvas = null;
+                    try {
+                        originalCanvas = await preprocessImagePayload(firstTask.imagePayload);
+                        // Run a fast layout pass using english without words level OCR to get blocks
+                        const { data } = await wLayout.worker.recognize(originalCanvas, {}, { blocks: true });
+                        if (data && data.blocks) layoutBlocks = data.blocks;
+                        wLayout.pagesProcessed++;
+                    } catch (e) {
+                        console.warn('[OCR] Layout pass failed', e);
+                    } finally {
+                        wLayout.isBusy = false;
+                        wLayout.activeTaskId = null;
+                        updateQueueUI();
+                    }
+
+                    // Threshold: ignore blocks that are too small. Require at least 2 valid blocks to split.
+                    const validBlocks = (layoutBlocks || []).filter(b => b.bbox && (b.bbox.x1 - b.bbox.x0 > 50) && (b.bbox.y1 - b.bbox.y0 > 50));
+                    
+                    if (validBlocks.length > 1) {
+                        console.log(`[OCR] Multi-region layout detected ${validBlocks.length} blocks.`);
+                        firstTask.isMultiRegion = true;
+                        firstTask.subTasks = [];
+
+                        for (let i = 0; i < validBlocks.length; i++) {
+                            const b = validBlocks[i];
+                            const w = b.bbox.x1 - b.bbox.x0;
+                            const h = b.bbox.y1 - b.bbox.y0;
+                            const cropCanvas = document.createElement('canvas');
+                            cropCanvas.width = w;
+                            cropCanvas.height = h;
+                            cropCanvas.getContext('2d').drawImage(originalCanvas, b.bbox.x0, b.bbox.y0, w, h, 0, 0, w, h);
+
+                            firstTask.subTasks.push({
+                                id: ++taskIdCounter,
+                                isSubTask: true,
+                                parent: firstTask,
+                                imagePayload: cropCanvas,
+                                lang: firstTask.lang,
+                                bbox: b.bbox,
+                                resolvedData: null,
+                                error: null,
+                                done: false
+                            });
+                        }
+                        
+                        totalTasks += (validBlocks.length - 1);
+                        queue.shift(); // Remove parent from active processing queue
+                        queue.unshift(...firstTask.subTasks); // Put subtasks at the front
+                        
+                        firstTask.checkCompletion = () => {
+                            if (firstTask.subTasks.every(st => st.done)) {
+                                const allWords = [];
+                                let fullText = '';
+                                // Sort regions into reading order before concatenating.
+                                // Tesseract's block detector returns blocks in ITS OWN
+                                // order, which is not guaranteed to be top-to-bottom /
+                                // left-to-right. Concatenating .text in that raw order
+                                // interleaves paragraphs and emits table rows before
+                                // their headers. Band rows by vertical overlap (blocks
+                                // on the same line shouldn't be ordered by a 1px y
+                                // difference), then left-to-right within a row.
+                                const ordered = firstTask.subTasks.slice().sort((a, b) => {
+                                    const ah = a.bbox.y1 - a.bbox.y0, bh = b.bbox.y1 - b.bbox.y0;
+                                    const tol = Math.min(ah, bh) * 0.5;
+                                    if (Math.abs(a.bbox.y0 - b.bbox.y0) > tol) return a.bbox.y0 - b.bbox.y0;
+                                    return a.bbox.x0 - b.bbox.x0;
+                                });
+                                for (const st of ordered) {
+                                    if (st.resolvedData && st.resolvedData.words) {
+                                        for (const w of st.resolvedData.words) {
+                                            if (w.bbox) {
+                                                w.bbox.x0 += st.bbox.x0;
+                                                w.bbox.x1 += st.bbox.x0;
+                                                w.bbox.y0 += st.bbox.y0;
+                                                w.bbox.y1 += st.bbox.y0;
+                                            }
+                                            allWords.push(w);
+                                        }
+                                        fullText += (st.resolvedData.text || '') + '\n\n';
+                                    }
+                                }
+                                firstTask.resolve({ text: fullText.trim(), words: allWords, isMultiRegion: true });
+                            }
+                        };
+                        continue; // Loop again to process the newly unshifted subtasks
+                    } else {
+                        console.log('[OCR] Single-pass region fallback.');
+                        firstTask.isMultiRegion = false;
+                        firstTask.imagePayload = originalCanvas || firstTask.imagePayload; // Reuse preprocessed
+                    }
+                }
 
                 if (firstTask.lang === 'auto' || !firstTask.lang) {
                     firstTask.lang = 'detecting...';
@@ -292,19 +381,37 @@
 
                 (async () => {
                     try {
+                        // If it's a subtask, it's already a canvas, but preprocess handles it cleanly anyway
                         const processedPayload = await preprocessImagePayload(task.imagePayload);
-                        const recognizeOptions = { user_defined_dpi: '300' };
+                        const recognizeOptions = { 
+                            user_defined_dpi: '300',
+                            tessedit_pageseg_mode: task.isSubTask ? '11' : '3'
+                        };
                         if (task.lang && task.lang.includes('ara')) {
                             recognizeOptions.tessedit_pageseg_mode = '3';
                         }
-                        const { data } = await w.worker.recognize(processedPayload, recognizeOptions);
+                        const { data } = await w.worker.recognize(processedPayload, recognizeOptions, { blocks: true, words: true });
                         completedTasks++;
                         w.pagesProcessed++;
-                        task.resolve((data && data.text) || '');
+                        
+                        const resultObj = { text: data ? data.text : '', words: data ? data.words : [] };
+                        if (task.isSubTask) {
+                            task.resolvedData = resultObj;
+                            task.done = true;
+                            task.parent.checkCompletion();
+                        } else {
+                            task.resolve({ ...resultObj, isMultiRegion: false });
+                        }
                     } catch (e) {
                         console.error('Background OCR Failed', e);
                         completedTasks++;
-                        task.reject(e);
+                        if (task.isSubTask) {
+                            task.error = e;
+                            task.done = true;
+                            task.parent.checkCompletion();
+                        } else {
+                            task.reject(e);
+                        }
                     } finally {
                         const duration = Date.now() - taskStartTimes.get(task.id);
                         taskDurations.push(duration);
@@ -351,7 +458,7 @@
             const confidence = result.data.script_confidence || 0;
             console.log('OSD Result:', result.data);
 
-            if (confidence < 15) {
+            if (confidence < 5) {
                 console.warn('OSD confidence too low:', confidence, 'falling back to eng');
                 return 'eng';
             }

@@ -1,0 +1,160 @@
+import argparse
+import os
+import sys
+
+# Ensure sibling packages are importable regardless of working directory
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import our modules
+from synthesizer.generator import build_document
+from synthesizer.ground_truth import parse_and_save_ground_truth
+from synthesizer.backends import render_pdf
+from synthesizer.degrader import apply_degradation
+from optimizer.fitness import TRAIN_DIR, HOLDOUT_DIR
+from optimizer.search import run_optimization, run_forever
+
+def synthesize_dataset(num_per_category, seed=42, out_dir=TRAIN_DIR):
+    import random
+    random.seed(seed)
+
+    categories = ["Academic", "Book", "Notebook", "Magazine", "Scanned", "Cursed"]
+
+    os.makedirs(out_dir, exist_ok=True)
+    for cat in categories:
+        os.makedirs(os.path.join(out_dir, cat), exist_ok=True)
+        
+    print(f"Generating {num_per_category} documents per category (seed={seed}) into {out_dir}/...")
+    
+    for cat in categories:
+        for i in range(num_per_category):
+            base_path = os.path.join(out_dir, cat, f"{cat.lower()}_{i:04d}")
+            pdf_path = base_path + ".pdf"
+            json_path = base_path + ".json"
+            
+            # 1. Generate Content (per-document seed for reproducibility)
+            doc_seed = seed + (hash(cat) % 10000) + i
+            md_str, gt_data = build_document(cat, seed=doc_seed)
+            
+            # 2. Save structured GT
+            parse_and_save_ground_truth(gt_data, json_path)
+            
+            # 3. Render PDF
+            try:
+                render_pdf(cat, md_str, pdf_path)
+                
+                # 4. Apply degradation if Cursed or Scanned
+                if cat in ("Cursed", "Scanned"):
+                    apply_degradation(pdf_path)
+                    
+            except Exception as e:
+                print(f"[ERROR] Synthesis failed for {pdf_path}: {e}")
+
+def serve_dashboard():
+    import http.server
+    import socketserver
+    
+    PORT = 8080
+    DIRECTORY = "training/dashboard"
+    
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=DIRECTORY, **kwargs)
+            
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Serving dashboard at http://localhost:{PORT}")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+
+def preflight_check():
+    """Verify the pipeline can actually score a document before wasting hours."""
+    print("=" * 50)
+    print("PREFLIGHT CHECK")
+    print("=" * 50)
+    
+    # 1. Check Playwright is installed
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+        print("[OK] Playwright + Chromium available")
+    except Exception as e:
+        sys.exit(f"[FAIL] Playwright/Chromium not available: {e}\n"
+                 f"       Run: pip install playwright && playwright install")
+    
+    # 2. Check at least one PDF + GT pair exists
+    import glob
+    pdfs = glob.glob("training/source_materials/**/*.pdf", recursive=True)
+    gts = glob.glob("training/source_materials/**/*.json", recursive=True)
+    if not pdfs:
+        sys.exit("[FAIL] No PDFs found in training/source_materials/. "
+                 "Run --synthesize first.")
+    if not gts:
+        sys.exit("[FAIL] No ground truth .json files found. "
+                 "Run --synthesize first.")
+    print(f"[OK] Found {len(pdfs)} PDFs and {len(gts)} ground truth files")
+    
+    # 3. Run one real extraction and verify non-error output
+    from benchmark.harness import smoke_test
+    if not smoke_test():
+        sys.exit("[FAIL] Smoke test failed. The harness cannot extract from LiteDoc. "
+                 "Check that src/index.html loads correctly in headless Chromium.")
+    
+    print("=" * 50)
+    print("ALL PREFLIGHT CHECKS PASSED")
+    print("=" * 50)
+
+def main():
+    parser = argparse.ArgumentParser(description="LiteDoc Training Pipeline")
+    parser.add_argument("--synthesize", type=int, help="Synthesize N PDFs per category (recommend 20+)")
+    parser.add_argument("--seed", type=int, default=42, help="RNG seed for reproducible synthesis")
+    parser.add_argument(
+        "--synthesize-holdout", type=int,
+        help="Synthesize N held-out validation PDFs per category (recommend 20-25%% of --synthesize). "
+             "These are never scored during --optimize search; only used to sanity-check the final "
+             "params. Written to training/holdout_materials/, kept separate from the search corpus."
+    )
+    parser.add_argument(
+        "--holdout-seed", type=int, default=None,
+        help="RNG seed for holdout synthesis. Defaults to --seed + 1000003 so the holdout set isn't "
+             "generated by the exact same seed as the search corpus."
+    )
+    parser.add_argument("--optimize", type=int, help="Run Bayesian optimization for N trials")
+    parser.add_argument(
+        "--optimize-forever", action="store_true",
+        help="Run Optuna search indefinitely (for a systemd-managed continuous training service). "
+             "Does not itself validate/save current_params.json — pair with a scheduled run of "
+             "notify_weekly.py to checkpoint + notify on improvement."
+    )
+    parser.add_argument("--dashboard", action="store_true", help="Serve the local dashboard")
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip preflight checks")
+
+    args = parser.parse_args()
+
+    if args.synthesize:
+        synthesize_dataset(args.synthesize, seed=args.seed, out_dir=TRAIN_DIR)
+
+    if args.synthesize_holdout:
+        holdout_seed = args.holdout_seed if args.holdout_seed is not None else args.seed + 1_000_003
+        synthesize_dataset(args.synthesize_holdout, seed=holdout_seed, out_dir=HOLDOUT_DIR)
+
+    if args.optimize:
+        if not args.skip_preflight:
+            preflight_check()
+        run_optimization(args.optimize)
+
+    if args.optimize_forever:
+        if not args.skip_preflight:
+            preflight_check()
+        run_forever()
+
+    if args.dashboard:
+        serve_dashboard()
+        
+    if not any(vars(args).values()):
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

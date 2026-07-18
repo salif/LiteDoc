@@ -118,15 +118,11 @@ body {
 }
 
 @media (max-width: 768px) {
-    @keyframes welcomeSlideUp {
-        from {
-            opacity: 0;
-            transform: translateY(15px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    .welcome-animate {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+        filter: none !important;
     }
 }
 

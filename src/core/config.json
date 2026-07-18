@@ -10,6 +10,8 @@
   "paragraphGapThreshold": 0.6852447228771202,
   "continuationGapThreshold": 0.9739378975653991,
   "tableGapYThreshold": 4.194102406109853,
+  "gapMultiplier": 1.0,
+  "ocrTolMultiplier": 4.0,
   "itemOverlapTolerance": 9,
   "garbageScoreThreshold": 0.17412123646291475
 }

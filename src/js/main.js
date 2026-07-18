@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Default worker URL (build.py will patch this with a data URI)
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         }
 
         // If the worker is already configured (e.g. inlined as a data URI or pointing to a CDN by the build script), skip detection
@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.info('[Boot] PDF.js worker already configured.');
         } else if (window.location.protocol === 'file:') {
             console.info('[Boot] Running on file:// protocol. Using CDN for PDF.js worker.');
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         } else {
             try {
                 // Try local worker first, but catch the 404 to avoid console noise if possible
@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } catch (e) {
                 console.info('[Boot] Local PDF.js worker not found or inaccessible. Falling back to CDN...');
-                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
             }
         }
 

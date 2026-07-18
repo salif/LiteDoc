@@ -365,7 +365,10 @@ async function processTableLines(linesToProcess, ctx, columnLabel, tableState) {
     const lines = [];
     for (const item of allItems) {
         const lastLine = lines[lines.length - 1];
-        const tol = Math.max(3, (item.height || 10) * 0.45);
+        const baseOcrTol = (typeof activeConfig !== 'undefined' && activeConfig.ocrTolMultiplier) ? activeConfig.ocrTolMultiplier : 4.0;
+        const ocrTolMultiplier = item.isOcr ? baseOcrTol : 1.0;
+        const rowSplitMultiplier = (typeof activeConfig !== 'undefined' && activeConfig.rowSplitMultiplier) ? activeConfig.rowSplitMultiplier : 3.0;
+        const tol = Math.max(3, (item.height || 10) * (rowSplitMultiplier / 6.6)) * ocrTolMultiplier;
         if (lastLine && Math.abs(item.y - (lastLine.lastY || lastLine.y)) <= tol) {
             lastLine.items.push(item);
             lastLine.lastY = item.y;
@@ -387,7 +390,8 @@ async function processTableLines(linesToProcess, ctx, columnLabel, tableState) {
         let currentCell = null;
 
         for (const item of sortedItems) {
-            const cellGapThreshold = (item.height || 10) * 0.8;
+            const gapMultiplier = (typeof activeConfig !== 'undefined' && activeConfig.gapMultiplier) ? activeConfig.gapMultiplier : 1.0;
+            const cellGapThreshold = (item.height || 10) * gapMultiplier;
             const gap = currentCell ? (item.x - currentCell.xMax) : Infinity;
 
             if (currentCell && gap < cellGapThreshold) {
@@ -411,11 +415,13 @@ async function processTableLines(linesToProcess, ctx, columnLabel, tableState) {
         if (isTableRow) {
             currentBlock.push(line);
         } else {
-            if (currentBlock.length >= 2) tableBlocks.push(currentBlock);
+            if (currentBlock.length >= 3) {
+                tableBlocks.push(currentBlock);
+            }
             currentBlock = [];
         }
     }
-    if (currentBlock.length >= 2) tableBlocks.push(currentBlock);
+    if (currentBlock.length >= 3) tableBlocks.push(currentBlock);
 
     let md = '';
     for (const blockLines of tableBlocks) {
@@ -433,6 +439,25 @@ async function processTableLines(linesToProcess, ctx, columnLabel, tableState) {
         }
         const numCols = finalCols.length;
         if (numCols < 2) continue;
+
+        // NEW: Column consistency gate
+        const colCounts = blockLines.map(l => l.cells.length);
+        const minCols = Math.min(...colCounts);
+        const maxCols = Math.max(...colCounts);
+        
+        // If the number of cells per row varies wildly, it's likely a falsely clustered paragraph.
+        if (maxCols - minCols > 2) {
+            logToTerminal(`Table detection: Skipped block, column count highly inconsistent (min: ${minCols}, max: ${maxCols})`, 'info');
+            continue;
+        }
+
+        // NEW: Vertical Alignment Gate
+        // In a real table, the distinct vertical columns (numCols) should roughly match the max cells in any row (maxCols).
+        // If numCols is much larger, it means the text is scattered (like a staggered prose paragraph) and doesn't form a grid.
+        if (numCols > maxCols + 1) {
+            logToTerminal(`Table detection: Skipped block, cells do not align vertically (numCols: ${numCols}, maxCols: ${maxCols})`, 'info');
+            continue;
+        }
 
         const grid = [];
         let overlapCount = 0;
@@ -680,6 +705,9 @@ function buildSettingsUI() {
                     <div class="ld-select-option" data-value="deu+eng">German + English</div>
                     <div class="ld-select-option" data-value="spa+eng">Spanish + English</div>
                     <div class="ld-select-option" data-value="chi_sim+eng">Chinese + English</div>
+                    <div class="ld-select-option" data-value="jpn+eng">Japanese + English</div>
+                    <div class="ld-select-option" data-value="kor+eng">Korean + English</div>
+                    <div class="ld-select-option" data-value="rus+eng">Russian + English</div>
                 </div>
             </div>
         </div>
