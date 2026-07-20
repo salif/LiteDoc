@@ -10,7 +10,7 @@ from optimizer.fitness import HOLDOUT_DIR, evaluate_parameters
 DB_PATH = "sqlite:///training/optimizer_state.db"
 JSON_OUT = "training/dashboard/data.json"
 
-def get_study(study_name="litedoc_tuning_v2"):
+def get_study(study_name="litedoc_tuning_v3"):
     """
     Creates or loads a persistent Optuna study using the Tree-structured
     Parzen Estimator (TPE) sampler for efficient Bayesian Optimization.
@@ -19,6 +19,11 @@ def get_study(study_name="litedoc_tuning_v2"):
     line-banding parser fix — scores are not comparable to the old objective, so
     old trials would only mislead TPE. The original "litedoc_tuning" study is
     preserved untouched in the same SQLite storage.
+
+    v3: fresh study for the reconnected enhanced-layout pass (grid tables,
+    figure extraction) — the parser it tunes changed underneath the search
+    (+8.5 pts at default params), so v2 trials describe a different landscape.
+    Both earlier studies remain untouched in the same storage.
     """
     return optuna.create_study(
         study_name=study_name,
@@ -101,7 +106,7 @@ def run_forever():
     Restart=always, not interactive use. Trials persist to optimizer_state.db as
     they complete, so a crash/restart resumes rather than losing progress.
     Does NOT do holdout validation or write current_params.json itself — that's
-    notify_weekly.py's job, run on a separate schedule against whatever the study's
+    notify_improvement.py's job, run on a separate schedule against whatever the study's
     current best is at check time.
     """
     study = get_study()

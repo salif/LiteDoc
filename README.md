@@ -59,6 +59,8 @@ There are incredible, industry-standard tools out there for PDF parsing, like **
 **LiteDoc is for people who just want their Markdown *right now*.**
 No dependencies, no server uploads, no privacy concerns. It runs entirely on your local machine using your browser's resources.
 
+*And if you ARE building a pipeline:* the same engine now ships as a proper CLI — `pip install litedoc-cli` — with globs, stdin/stdout, JSON envelopes, and an optional bring-your-own-model AI repair pass. See [the CLI section](#the-cli) below.
+
 ---
 
 ## Key Features
@@ -70,6 +72,7 @@ No dependencies, no server uploads, no privacy concerns. It runs entirely on you
 | **Layout Analysis** | Kahn's Topological Sort on a DAG of geometric blocks determines correct reading order across sidebars, headers, and multi-column page layouts — no horizontal text mixing. |
 | **Table Extraction** | Vector line detection builds GitHub-Flavored Markdown tables with merged cell support. Extraction heuristics are tuned via Bayesian Optimization (Optuna) against synthetic layout edge-case simulations. |
 | **Math Rendering** | Detects formula bounding boxes (including PUA-encoded symbols) and preserves them as high-fidelity images or KaTeX. |
+| **Figure & Chart Extraction** | Vector graphics (charts, diagrams, plots) are detected from the PDF's drawing operators, cropped **with their axis labels and annotations included**, and placed above their captions in the output — instead of leaking stray label text into your prose. |
 | **Gibberish Detection** | Statistical scoring identifies corrupted custom-encoded fonts and routes them to OCR fallback. |
 
 ### Privacy & Performance
@@ -98,6 +101,22 @@ LiteDoc now ships an opt-in **"Clean with AI"** feature: after the local parser 
 - **Private by design** — documents are processed in memory and never written to disk, stored, or logged. Accounts are username + password only; we never ask for an email.
 - **How it's funded** — AI cleanup runs on tokens purchased as gift codes from the [Ko-fi shop](https://ko-fi.com/0xovo/shop). This add-on exists so supporting the project isn't a one-way street: donors get something genuinely useful back, and every purchase keeps the servers running.
 
+## The CLI
+
+The full extraction engine is also available as a command-line tool for scripts and pipelines — identical output to the web app, because it drives the exact same engine headlessly:
+
+```bash
+pip install litedoc-cli
+playwright install chromium        # one-time engine download
+
+litedoc convert paper.pdf                                # markdown to stdout
+litedoc convert scans/*.pdf -o out/ --ocr                # batch + OCR
+litedoc convert paper.pdf -o out/ --images out/images    # extracted figures as JPEGs
+litedoc convert scan.pdf --ai-url http://localhost:11434 # repair with YOUR model
+```
+
+Deterministic by default (no AI, no network). The optional AI repair pass is **triage-first**: it detects the specific sections that are actually damaged — broken sentences, ragged tables, OCR artifacts — and sends *only those* to the model, never your whole document. Point it at your own Ollama/OpenAI-compatible endpoint with `--ai-url`, or at the hosted service with `--ai`. Full docs: [`cli/README.md`](cli/README.md).
+
 ## Getting Started
 
 Because LiteDoc is a purely client-side web application, you don't need to install any dependencies to run it!
@@ -109,7 +128,8 @@ Because LiteDoc is a purely client-side web application, you don't need to insta
 
 **Run from Source:**
 1. Clone or download this repository.
-2. Open `dist/index.html` in your browser.
+2. Build the single-file app: `python scripts/build.py`
+3. Open the generated `dist/index.html` in your browser.
 
 ### Development & Custom Builds
 If you want to modify the source code:
@@ -121,17 +141,13 @@ If you want to modify the source code:
 3. The compiled production bundle will be updated at `dist/index.html`.
 
 ### Release Workflow (Maintainers)
-When cutting a new release for GitHub, follow this exact strict checklist to ensure no sensitive data leaks:
-1. Tag a new commit with `vX.Y.Z`.
-2. Run the build script with the version stamp:
-   ```bash
-   python scripts/build.py --version=X.Y.Z
-   ```
-3. Run the security check script. It will scan the generated `index.html` for any leaked secrets (API keys, dev backend URLs, etc.):
-   ```bash
-   ./scripts/pre_publish_check.sh
-   ```
-4. Only if the check passes (`✅ No obvious secrets...`), attach the resulting `dist/index.html` to a GitHub Release for that tag.
+Releases are fully automated through a single gated controller:
+
+```bash
+python scripts/release.py --version X.Y.Z
+```
+
+It runs the complete test suite first (**any failure builds nothing**), then builds the public edition, verifies it contains no secrets or dev URLs via an automated leak scan, produces the release zip, and rebuilds the version-stamped CLI package. Only artifacts that pass every gate come out the other end. Each release ships with `RELEASE.md` — an auto-generated document with the release notes and the measured extraction benchmark for that version.
 
 ### Training & Heuristic Optimization
 LiteDoc's parser is driven by a set of layout, table, and OCR heuristics (column proximity, alignment tolerances, math detection margins, and more). Those parameters are no longer hand-tuned — this repository ships the complete, open-source **Synthetic Dataset Training Pipeline** that tunes them automatically.

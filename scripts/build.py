@@ -11,6 +11,7 @@ import textwrap
 import urllib.request
 import urllib.parse
 import argparse
+import time
 from pathlib import Path
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -162,7 +163,7 @@ def bundle_js(src: Path, files: list[str]) -> str:
 
 # HTML inlining
 
-def build_ai_widget_tags(base_url: str) -> str:
+def build_ai_widget_tags(base_url: str, version: str = "") -> str:
     """External <link>/<script> tags that load the (separately hosted) AI addon widget.
 
     These are injected ONLY for the hosted edition (build --ai-widget <url>), never
@@ -175,11 +176,19 @@ def build_ai_widget_tags(base_url: str) -> str:
     auth.js defines. Order below is load-bearing.
     """
     base = base_url.rstrip("/")
+    # Cache-buster: Cloudflare serves /widget/* with a 4h edge+browser TTL, so an
+    # unversioned URL means widget fixes take up to 4 hours to reach users (and
+    # testers see stale CSS and file bug reports about it). A versioned query
+    # string makes every newly deployed index fetch fresh assets immediately.
+    # Unique per BUILD, not per release: redeploying widget files under an
+    # unchanged version string would re-pin the stale copies for another TTL.
+    bust = f"{version}-{int(time.time())}" if version else str(int(time.time()))
+    q = f"?v={bust}"
     return (
-        f'<link rel="stylesheet" href="{base}/auth.css">\n'
-        f'<link rel="stylesheet" href="{base}/ai-addon.css">\n'
-        f'<script src="{base}/auth.js"></script>\n'
-        f'<script src="{base}/ai-addon.js"></script>\n'
+        f'<link rel="stylesheet" href="{base}/auth.css{q}">\n'
+        f'<link rel="stylesheet" href="{base}/ai-addon.css{q}">\n'
+        f'<script src="{base}/auth.js{q}"></script>\n'
+        f'<script src="{base}/ai-addon.js{q}"></script>\n'
     )
 
 
@@ -280,7 +289,7 @@ def inline_into_html(html: str, css_blob: str, js_blob: str, version: str, ai_wi
     # Hosted edition only: append external AI-widget tags just before </body>, after
     # the inlined app scripts (so the app DOM the widget injects into already exists).
     if ai_widget:
-        widget_tags = "\n" + build_ai_widget_tags(ai_widget)
+        widget_tags = "\n" + build_ai_widget_tags(ai_widget, version)
         html = html.replace("</body>", widget_tags + "</body>", 1) if "</body>" in html else html + "\n" + widget_tags
         log(INFO, f"injected hosted AI-widget tags pointing at {ai_widget}")
 

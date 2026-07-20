@@ -126,7 +126,7 @@ def main():
         "--optimize-forever", action="store_true",
         help="Run Optuna search indefinitely (for a systemd-managed continuous training service). "
              "Does not itself validate/save current_params.json — pair with a scheduled run of "
-             "notify_weekly.py to checkpoint + notify on improvement."
+             "notify_improvement.py to checkpoint + notify on improvement."
     )
     parser.add_argument("--dashboard", action="store_true", help="Serve the local dashboard")
     parser.add_argument("--skip-preflight", action="store_true", help="Skip preflight checks")

@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--baseline", required=True, help="Path to baseline params JSON")
     parser.add_argument("--candidate", required=True, help="Path to candidate params JSON")
     parser.add_argument("--data", default="training/source_materials", help="Dataset directory")
+    parser.add_argument("--json-out", default="", help="Also write full results as JSON to this path")
     args = parser.parse_args()
 
     baseline = load_params(args.baseline)
@@ -49,6 +50,15 @@ def main():
     delta = (cand_score - base_score) * 100
     sign = "+" if delta >= 0 else ""
     print(f"\nDelta: {sign}{delta:.2f} percentage points")
+
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as f:
+            json.dump({
+                "baseline": {"score": base_score, "breakdown": base_breakdown},
+                "candidate": {"score": cand_score, "breakdown": cand_breakdown},
+                "delta_points": delta,
+                "dataset": args.data,
+            }, f, indent=2)
 
 
 if __name__ == "__main__":

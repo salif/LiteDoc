@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — LiteDoc</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #06070a; color: #cbd5e1; font-family: system-ui, -apple-system, sans-serif; line-height: 1.7; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { color: #f1f5f9; font-size: 28px; margin-bottom: 4px; }
+  h2 { color: #f1f5f9; font-size: 18px; margin-top: 36px; }
+  a { color: #818cf8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .updated { color: #64748b; font-size: 13px; }
+  .highlight { background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px; padding: 14px 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); vertical-align: top; }
+  th { color: #94a3b8; font-weight: 600; }
+  code { background: #10121b; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/">&larr; Back to LiteDoc</a></p>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Effective 18 July 2026 · litedoc.xyz</p>
+
+  <div class="highlight">
+    <strong>The short version:</strong> the converter runs entirely in your browser — your PDFs
+    never leave your device. If you opt into AI Cleanup, the one document you send is processed
+    in memory on our own server and purged within minutes: never written to disk, never stored,
+    never used for training, never shared with any third-party AI provider. We don't want your
+    email, and we run no analytics or tracking of any kind.
+  </div>
+
+  <h2>The converter (no account)</h2>
+  <p>Converting PDFs on litedoc.xyz happens 100% client-side. We receive nothing: not your
+  files, not their names, not their contents. There are no analytics scripts, no tracking
+  pixels, and no advertising identifiers anywhere on the site.</p>
+
+  <h2>AI Cleanup accounts (optional)</h2>
+  <p>The optional AI Cleanup feature requires a free account. We collect the minimum that makes
+  it work:</p>
+  <table>
+    <tr><th>Data</th><th>Why</th><th>Kept</th></tr>
+    <tr><td>Username + password (hashed)</td><td>Your login. We never ask for an email address.</td><td>Until you delete your account</td></tr>
+    <tr><td>Token balance &amp; usage history</td><td>Billing for AI cleanup (character counts only — never document content)</td><td>Until you delete your account</td></tr>
+    <tr><td>IP address + country on logins/logouts</td><td>Your own security log — the dashboard shows you where your account was accessed, and only you (and we, for abuse response) can see it</td><td>Until you delete your account</td></tr>
+    <tr><td>Documents sent to "Clean with AI"</td><td>Processing only, on our own self-hosted model</td><td><strong>Minutes</strong> — held in memory, purged after the result is returned, never written to disk or logs</td></tr>
+  </table>
+
+  <h2>Purchases</h2>
+  <p>Token purchases go through <a href="https://ko-fi.com" rel="noopener">Ko-fi</a> (see their
+  privacy policy). Ko-fi sends us your supporter name, the amount, and the email address you used,
+  which we use once to deliver your gift code (sent via Resend) and to maintain the public
+  supporters list — which only ever shows names Ko-fi marks as public. We do not see or store
+  card details.</p>
+
+  <h2>Service providers</h2>
+  <p>These providers process limited technical data on our behalf: <strong>Cloudflare</strong>
+  (traffic proxying, bot protection — sees IPs like any network host), <strong>Oracle Cloud</strong>
+  (server hosting), <strong>hCaptcha</strong> (bot detection on login/signup — see their privacy
+  policy), <strong>Resend</strong> (gift-code delivery emails), and <strong>Vercel</strong> (static
+  site hosting). None of them receive your documents.</p>
+
+  <h2>Cookies &amp; storage</h2>
+  <p>We set no tracking cookies and show no cookie banner because there is nothing to consent to.
+  Your browser's local storage holds your session token (if you log in) and your app settings.
+  hCaptcha sets strictly-necessary cookies for bot detection during login/signup.</p>
+
+  <h2>Your rights</h2>
+  <p>Your dashboard lets you view your full activity log and balance history, sign out other
+  devices, and <strong>delete your account</strong> — deletion is immediate and removes your
+  account, passkeys, history, and security log. For anything else (including data questions under
+  GDPR or similar laws), email
+  <a href="mailto:contact@litedoc.xyz">contact@litedoc.xyz</a>.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes materially, we'll note it in the release notes and update the date
+  above. The project is open source — you can watch this very file change on
+  <a href="https://github.com/0xovo/LiteDoc" rel="noopener">GitHub</a>.</p>
+</main>
+</body>
+</html>

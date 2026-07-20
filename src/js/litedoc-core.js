@@ -343,23 +343,47 @@ var LiteDocCore = (function () {
         }
         if (vectorOpCount < 80) return '';
 
+        // Path coordinates arrive in the CURRENT TRANSFORM's space (figures
+        // are usually wrapped in Form XObjects with their own matrix), so a
+        // transform stack must be replayed to place boxes on the page. pdf.js
+        // constructPath minMax order is [minX, maxX, minY, maxY].
         const boxes = [];
+        const mstack = [];
+        let ctm = [1, 0, 0, 1, 0, 0];
+        const mmul = (m1, m2) => [
+            m1[0] * m2[0] + m1[2] * m2[1],
+            m1[1] * m2[0] + m1[3] * m2[1],
+            m1[0] * m2[2] + m1[2] * m2[3],
+            m1[1] * m2[2] + m1[3] * m2[3],
+            m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+            m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+        ];
+        const mapply = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+        const pushBox = (x0, y0, x1, y1) => {
+            if (![x0, y0, x1, y1].every(isFinite)) return;
+            const pts = [mapply(ctm, x0, y0), mapply(ctm, x1, y0), mapply(ctm, x0, y1), mapply(ctm, x1, y1)];
+            const minX = Math.min(...pts.map(p => p[0])), maxX = Math.max(...pts.map(p => p[0]));
+            const minY = Math.min(...pts.map(p => p[1])), maxY = Math.max(...pts.map(p => p[1]));
+            const w = maxX - minX, h = maxY - minY;
+            if (!isFinite(w) || !isFinite(h)) return;
+            // Charts are made of thin lines (h≈0) and small markers — keep
+            // them; clustering (count >= 3) filters out stray underlines.
+            if (w > 8 || h > 8 || (w > 2 && h > 2)) {
+                boxes.push({ x: minX, y: minY, w: Math.max(w, 1), h: Math.max(h, 1) });
+            }
+        };
         for (let i = 0; i < ops.fnArray.length; i++) {
-            if (ops.fnArray[i] === OPS.constructPath) {
-                const args = ops.argsArray[i];
-                if (Array.isArray(args) && args.length >= 3 && Array.isArray(args[2])) {
-                    const [minX, minY, maxX, maxY] = args[2];
-                    if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
-                        const w = maxX - minX, h = maxY - minY;
-                        if (w > 8 && h > 8) boxes.push({ x: minX, y: minY, w, h });
-                    }
+            const fn = ops.fnArray[i], args = ops.argsArray[i];
+            if (fn === OPS.save) mstack.push(ctm.slice());
+            else if (fn === OPS.restore) { if (mstack.length) ctm = mstack.pop(); }
+            else if (fn === OPS.transform) { if (args && args.length >= 6) ctm = mmul(ctm, args); }
+            else if (fn === OPS.constructPath) {
+                if (args && args.length >= 3 && args[2] && args[2].length >= 4) {
+                    const mm = args[2];
+                    pushBox(mm[0], mm[2], mm[1], mm[3]);
                 }
-            } else if (ops.fnArray[i] === OPS.rectangle) {
-                const a = ops.argsArray[i];
-                if (Array.isArray(a) && a.length >= 4) {
-                    const [x, y, w, h] = a;
-                    if (w > 8 && h > 8) boxes.push({ x, y, w, h });
-                }
+            } else if (fn === OPS.rectangle) {
+                if (args && args.length >= 4) pushBox(args[0], args[1], args[0] + args[2], args[1] + args[3]);
             }
         }
         if (boxes.length < 4) return '';
@@ -411,10 +435,39 @@ var LiteDocCore = (function () {
         let md = '';
         let figIdx = 1;
         for (const f of figures) {
-            const sx = Math.max(0, f.x * SCALE - 6);
-            const sw = Math.min(canvas.width - sx, f.w * SCALE + 12);
-            const sy = Math.max(0, (pageH - f.y - f.h) * SCALE - 6);
-            const sh = Math.min(canvas.height - sy, f.h * SCALE + 12);
+            // Grow the crop to cover text that belongs to the figure (axis
+            // labels, legends, annotations) so it isn't sliced off, and consume
+            // that text from the prose flow — it lives in the image instead.
+            // Captions ("Figure 3: …") always stay in the text flow.
+            let fx0 = f.x, fy0 = f.y, fx1 = f.x + f.w, fy1 = f.y + f.h;
+            const consumedLgs = [];
+            const nearPad = 26;
+            for (const lg of ctx.lineGroups) {
+                const lgItems = lg.items.filter(it => !it.garbage && (it.str || '').trim());
+                if (!lgItems.length) continue;
+                let lx0 = Infinity, ly0 = Infinity, lx1 = -Infinity, ly1 = -Infinity;
+                for (const it of lgItems) {
+                    lx0 = Math.min(lx0, it.x); lx1 = Math.max(lx1, it.x + (it.width || 0));
+                    ly0 = Math.min(ly0, it.y); ly1 = Math.max(ly1, it.y + (it.height || 10));
+                }
+                const cx = (lx0 + lx1) / 2, cy = (ly0 + ly1) / 2;
+                if (cx < f.x - nearPad || cx > f.x + f.w + nearPad ||
+                    cy < f.y - nearPad || cy > f.y + f.h + nearPad) continue;
+                const lgText = (lg.text || lg.rawText || '').trim();
+                if (/^(figure|fig\.|table|chart)\s*\d*\s*[:.]/i.test(lgText)) continue;
+                const fullyInside = lx0 >= f.x - 6 && lx1 <= f.x + f.w + 6 &&
+                    ly0 >= f.y - 6 && ly1 <= f.y + f.h + 6;
+                if (!fullyInside && lgText.length > 45) continue; // body text brushing the edge
+                fx0 = Math.min(fx0, lx0); fy0 = Math.min(fy0, ly0);
+                fx1 = Math.max(fx1, lx1); fy1 = Math.max(fy1, ly1);
+                consumedLgs.push(lg);
+            }
+            const cw = fx1 - fx0, ch = fy1 - fy0;
+            const cropPad = Math.max(8, Math.min(pageW, pageH) * 0.012);
+            const sx = Math.max(0, fx0 * SCALE - cropPad * SCALE);
+            const sw = Math.min(canvas.width - sx, cw * SCALE + 2 * cropPad * SCALE);
+            const sy = Math.max(0, (pageH - fy1) * SCALE - cropPad * SCALE);
+            const sh = Math.min(canvas.height - sy, ch * SCALE + 2 * cropPad * SCALE);
             if (sw < 20 || sh < 20) continue;
             const crop = document.createElement('canvas');
             crop.width = Math.round(sw);
@@ -427,17 +480,24 @@ var LiteDocCore = (function () {
             const dataUrl = crop.toDataURL('image/jpeg', q);
             crop.width = 0; crop.height = 0;
             const name = `${fileName}_p${pageNum}_figure${figIdx}.jpg`;
-            extractedImages.push({ name, dataUrl, dims: `${sw}×${sh}` });
+            extractedImages.push({ name, dataUrl, dims: `${Math.round(sw)}×${Math.round(sh)}`, page: pageNum,
+                bbox: { x: Math.round(fx0), y: Math.round(fy0), w: Math.round(cw), h: Math.round(ch) } });
 
-            const figureMd = `\n\n!Figure ${figIdx}`;
+            for (const lg of consumedLgs) {
+                for (const it of lg.items) { it.garbage = true; it.str = ''; }
+            }
 
-            // Map the figure back into the text flow using its vertical position
-            const figTopY = f.y + f.h;
-            const closestLg = ctx.lineGroups.length > 0 ? ctx.lineGroups.reduce((prev, curr) => {
-                return (Math.abs(curr.y - figTopY) < Math.abs(prev.y - figTopY)) ? curr : prev;
-            }, ctx.lineGroups[0]) : null;
+            const figureMd = `\n\n![Figure ${figIdx}](${name})\n\n`;
 
-            if (closestLg && Math.abs(closestLg.y - figTopY) < 150) closestLg.injectedMarkdown = (closestLg.injectedMarkdown || '') + figureMd;
+            // Anchor the figure just above the first text line BELOW it — for
+            // captioned figures that's the caption, so the image renders
+            // directly above its caption instead of mid-paragraph.
+            const below = ctx.lineGroups.filter(lg =>
+                lg.y < fy0 && !lg.garbage && (lg.text || '').trim() &&
+                lg.items.some(it => !it.garbage));
+            const anchorLg = below.length ? below.reduce((a, b) => (b.y > a.y ? b : a)) : null;
+
+            if (anchorLg && (fy0 - anchorLg.y) < 150) anchorLg.injectedMarkdown = (anchorLg.injectedMarkdown || '') + figureMd;
             else md += figureMd;
 
             figIdx++;
@@ -632,6 +692,16 @@ var LiteDocCore = (function () {
                 continue;
             }
 
+            // Prose gate: real table cells are short labels/values. Long,
+            // sentence-fragment cells mean this "grid" is columns of body text.
+            const cellTexts = [];
+            grid.forEach(r => r.rowData.forEach(c => { if (c.trim()) cellTexts.push(c.trim()); }));
+            const avgCellLen = cellTexts.reduce((s, c) => s + c.length, 0) / Math.max(1, cellTexts.length);
+            if (avgCellLen > 45) {
+                logToTerminal(`Table detection: Skipped block, cells read like prose (avg ${Math.round(avgCellLen)} chars)`, 'info');
+                continue;
+            }
+
             logToTerminal(`Table detection: Found table with ${grid.length} rows, ${numCols} cols`, 'success');
 
             for (const r of grid) {
@@ -688,6 +758,8 @@ var LiteDocCore = (function () {
                     }
                 }
             }
+
+            if (ctx.pageLayout) ctx.pageLayout.tables.push({ rows: grid.map(r => r.rowData.map(esc)) });
 
             const firstItem = grid[0].line.cells.find(c => c.items.length)?.items[0];
             const parentLg = firstItem ? ctx.lineGroups.find(lg => lg.items.includes(firstItem)) : null;
@@ -1038,19 +1110,19 @@ var LiteDocCore = (function () {
     // training/current_params.json). itemOverlapTolerance and garbageScoreThreshold
     // are not part of the search space and keep their hand-set defaults.
     const DEFAULT_CONFIG = {
-        horizontalGapMultiplier: 0.7521426180831484,
-        rowSplitMultiplier: 1.6814928388059278,
-        horizontalGapMin: 9,
-        bottomMarginThreshold: 0.8325418340129557,
-        topMarginThreshold: 0.1414407581914072,
-        distanceFromCenterPenalty: 4.99632617391084,
-        tableDensityThreshold: 0.8252067528442912,
-        pageGarbageRatioThreshold: 0.83503476251094,
-        paragraphGapThreshold: 1.3893865315064922,
-        continuationGapThreshold: 2.8802907493837626,
-        tableGapYThreshold: 4.927368708674492,
-        gapMultiplier: 1.7212538907054244,
-        ocrTolMultiplier: 3.439668945857592,
+        horizontalGapMultiplier: 1.219497353517404,
+        rowSplitMultiplier: 3.1024126595800956,
+        horizontalGapMin: 12,
+        bottomMarginThreshold: 0.8326907199134223,
+        topMarginThreshold: 0.10044413724016359,
+        distanceFromCenterPenalty: 4.840529410092541,
+        tableDensityThreshold: 0.6985618842172149,
+        pageGarbageRatioThreshold: 0.4554856547254581,
+        paragraphGapThreshold: 1.5088077796767423,
+        continuationGapThreshold: 2.346406152053748,
+        tableGapYThreshold: 2.055654766434288,
+        gapMultiplier: 0.6148540876742017,
+        ocrTolMultiplier: 2.733889345414216,
         itemOverlapTolerance: 4,
         garbageScoreThreshold: 0.20
     };
@@ -1534,24 +1606,14 @@ var LiteDocCore = (function () {
                 const pdfDoc = pdf.pdf ? pdf.pdf : pdf;
                 logToTerminal(`Recognized. Pages: ${pdfDoc.numPages}`);
 
-                // Language Auto-Detect (OSD Router)
-                let docOcrLang = 'eng';
-                if (__litedocAddons && __litedocAddons.ocrEnabled() && __litedocAddons._settings.ocrLang === 'auto') {
-                    try {
-                        const pg1 = await pdfDoc.getPage(1);
-                        const vp = pg1.getViewport({ scale: 1.5 });
-                        const canv = document.createElement('canvas');
-                        canv.width = vp.width; canv.height = vp.height;
-                        const ctx = canv.getContext('2d');
-                        await pg1.render({ canvasContext: ctx, viewport: vp }).promise;
-                        if (window.__litedocOCR && window.__litedocOCR.detectScript) {
-                            docOcrLang = await window.__litedocOCR.detectScript(canv);
-                        }
-                        pg1.cleanup();
-                    } catch (e) { docOcrLang = 'eng'; }
-                } else {
-                    docOcrLang = (__litedocAddons && __litedocAddons._settings.ocrLang) || 'eng';
-                }
+                // OCR language: pass 'auto' straight through to the OCR queue.
+                // It resolves the script PER PAGE (whole page → 2x → bands) and
+                // has a post-OCR rescue: if the eng model returns a cluster of
+                // low-confidence garbage words, that crop is script-detected and
+                // the page re-OCR'd with the right "<script>+eng" combo. A
+                // doc-level pre-route can't do any of that (one Japanese line on
+                // an English page is invisible to whole-page script detection).
+                const docOcrLang = (__litedocAddons && __litedocAddons._settings.ocrLang) || 'eng';
 
                 // pass 1: fingerprint
                 let allRawLineTexts = [];
@@ -1598,6 +1660,10 @@ var LiteDocCore = (function () {
 
                 let mdText = `\x3C!-- Converted from ${file.name} — ${pdfDoc.numPages} pages --\x3E\n\n`;
                 const extractedImages = [];
+                // Structured layout (per page: lines, tables, figures) — the same
+                // data the markdown is generated FROM, exposed for --json consumers
+                // instead of being thrown away at serialization.
+                const docLayout = [];
                 const pageInlineRenders = {};
                 const sharedCanvas = document.createElement('canvas');
                 const sharedCtx = sharedCanvas.getContext('2d', { willReadFrequently: true });
@@ -1803,8 +1869,51 @@ var LiteDocCore = (function () {
 
                         const medH = allLineGroups.map(l => l.height).sort((a,b) => a-b)[Math.floor(allLineGroups.length/2)] || 12;
                         const hThresh = classifyHeadings(allLineGroups);
-                        console.log('[DBG] hThresh', JSON.stringify(hThresh), 'medH', medH);
-                        for (const l of allLineGroups) console.log('[DBG] line fs=' + l.fontSize + ' h=' + l.height + ' g=' + !!l.garbage + ' :: ' + (l.text || '').slice(0, 60));
+
+                        const pageLayout = {
+                            page: pageNum,
+                            width: Math.round(pageW), height: Math.round(pageH),
+                            lines: allLineGroups
+                                .filter(l => !l.garbage && (l.text || '').trim())
+                                .map(l => ({
+                                    text: l.text,
+                                    y: Math.round(l.y * 100) / 100,
+                                    x0: Math.round((l.xMin || 0) * 100) / 100,
+                                    x1: Math.round((l.xMax || 0) * 100) / 100,
+                                    font_size: l.fontSize || null,
+                                    block: l.blockIdx || 1,
+                                    ocr: !!(l.items && l.items.some(it => it.isOcr)),
+                                })),
+                            tables: [],
+                        };
+                        docLayout.push(pageLayout);
+
+                        // Enhanced layout pass: vector-grid tables, figure extraction,
+                        // math regions, citations. Consumes matched items (garbage-marks
+                        // them) and attaches injectedMarkdown to their line groups, which
+                        // linesToMd renders in place; leftovers come back as `enhancedMd`.
+                        // Feed table detection per text block, never the whole page:
+                        // on multi-column pages the page-wide grid pass pairs cells
+                        // across prose columns and "detects" the layout as a table.
+                        const blockGroupMap = {};
+                        for (const lg of allLineGroups) {
+                            const k = lg.blockIdx !== undefined ? lg.blockIdx : -1;
+                            if (!blockGroupMap[k]) blockGroupMap[k] = [];
+                            blockGroupMap[k].push(lg);
+                        }
+                        const blockGroups = Object.keys(blockGroupMap)
+                            .map(k => parseInt(k)).sort((a, b) => a - b)
+                            .map(k => blockGroupMap[k]);
+
+                        const enhancedMd = await enhancePage({
+                            page, pdfjsLib, pageNum, pageW, pageH,
+                            fileName: file.name.replace(/\.pdf$/i, ''),
+                            extractedImages,
+                            lineGroups: allLineGroups,
+                            columns: blockGroups.length > 1 ? blockGroups : null,
+                            pageLayout,
+                            logToTerminal,
+                        });
 
                         function linesToMd(lines) {
                             const mdArr = [];
@@ -1846,6 +1955,7 @@ var LiteDocCore = (function () {
                                     tableBuffer = []; tableColsBounds = []; return;
                                 }
 
+                                pageLayout.tables.push({ rows: tableBuffer.map(r => r.slice()) });
                                 mdArr.push('| ' + tableBuffer[0].join(' | ') + ' |');
                                 mdArr.push('|' + Array(tableBuffer[0].length).fill('---').join('|') + '|');
                                 for (let i = 1; i < tableBuffer.length; i++) mdArr.push('| ' + tableBuffer[i].join(' | ') + ' |');
@@ -1854,6 +1964,13 @@ var LiteDocCore = (function () {
                             const flushPara = () => { if (paragraphBuf.trim()) { mdArr.push(paragraphBuf.trim()); paragraphBuf = ''; } };
 
                             for (const lg of lines) {
+                                // Content injected by the enhancement pass (grid tables,
+                                // figures, math) anchored to this line — emit it in place.
+                                if (lg.injectedMarkdown && lg.injectedMarkdown.trim()) {
+                                    flushPara(); flushTable();
+                                    mdArr.push(lg.injectedMarkdown.trim());
+                                    lg.injectedMarkdown = '';
+                                }
                                 const sortedItems = [...lg.items.filter(it => !it.garbage)].sort((a, b) => a.x - b.x);
                                 if (sortedItems.length === 0) continue;
 
@@ -1932,6 +2049,9 @@ var LiteDocCore = (function () {
                         for (const k of blockKeys) pageMdLines.push(...linesToMd(bodyBlocks[k]));
 
                         let pageMd = pageMdLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+                        if (enhancedMd && enhancedMd.trim()) {
+                            pageMd = (pageMd + '\n\n' + enhancedMd.trim()).trim().replace(/\n{3,}/g, '\n\n');
+                        }
                         
                         const showPageNums = typeof window !== 'undefined' && window.state ? !window.state.excludePageNumbers : true;
                         if (showPageNums) {
@@ -1951,7 +2071,7 @@ var LiteDocCore = (function () {
                     await processChunk(chunkStart, Math.min(chunkStart + CHUNK_SIZE - 1, pdfDoc.numPages));
                 }
                 await pdfDoc.destroy();
-                state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders, numPages: pdfDoc.numPages });
+                state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders, numPages: pdfDoc.numPages, layout: docLayout });
             } catch (err) { logToTerminal(`Failed: ${file.name}`, 'error'); }
         }
         updateProgress(100, 'Complete', '');

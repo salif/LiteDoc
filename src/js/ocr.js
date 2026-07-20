@@ -362,6 +362,9 @@
                         firstTask.resolvedLang = 'eng';
                     }
                     firstTask.lang = firstTask.resolvedLang;
+                    // Remember this so the post-OCR foreign-script rescue knows
+                    // it may second-guess an 'eng' routing that OSD got wrong.
+                    firstTask.wasAutoLang = true;
                 }
 
                 if (firstTask.lang === 'detecting...') break;
@@ -380,10 +383,11 @@
                 updateQueueUI();
 
                 (async () => {
+                    let requeuedForScript = false;
                     try {
                         // If it's a subtask, it's already a canvas, but preprocess handles it cleanly anyway
                         const processedPayload = await preprocessImagePayload(task.imagePayload);
-                        const recognizeOptions = { 
+                        const recognizeOptions = {
                             user_defined_dpi: '300',
                             tessedit_pageseg_mode: task.isSubTask ? '11' : '3'
                         };
@@ -391,9 +395,52 @@
                             recognizeOptions.tessedit_pageseg_mode = '3';
                         }
                         const { data } = await w.worker.recognize(processedPayload, recognizeOptions, { blocks: true, words: true });
+
+                        // Foreign-script rescue. Whole-page script detection can
+                        // never catch ONE foreign line on an otherwise-English
+                        // page (OSD only reports the dominant script). But the
+                        // eng model *tells* us where it failed: garbage words get
+                        // very low confidence. Cluster them, OSD just that crop
+                        // (which IS dominated by the foreign script), and if it
+                        // names a different language, re-OCR this task once with
+                        // the right "<script>+eng" combo.
+                        if (!task.scriptRetryDone && task.wasAutoLang && !task.isSubTask
+                                && data && data.words && processedPayload && processedPayload.getContext) {
+                            const low = data.words.filter(x => (x.confidence || 0) < 50
+                                && x.text && x.text.trim().length > 1 && x.bbox);
+                            if (low.length >= 3) {
+                                let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+                                for (const lw of low) {
+                                    x0 = Math.min(x0, lw.bbox.x0); y0 = Math.min(y0, lw.bbox.y0);
+                                    x1 = Math.max(x1, lw.bbox.x1); y1 = Math.max(y1, lw.bbox.y1);
+                                }
+                                const pad = 10;
+                                x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+                                x1 = Math.min(processedPayload.width, x1 + pad);
+                                y1 = Math.min(processedPayload.height, y1 + pad);
+                                if (x1 - x0 > 20 && y1 - y0 > 10) {
+                                    const crop = document.createElement('canvas');
+                                    crop.width = x1 - x0; crop.height = y1 - y0;
+                                    crop.getContext('2d').drawImage(processedPayload,
+                                        x0, y0, crop.width, crop.height, 0, 0, crop.width, crop.height);
+                                    let rescueLang = 'eng';
+                                    try { rescueLang = await detectLanguage(crop); } catch (e) { }
+                                    task.scriptRetryDone = true;
+                                    if (rescueLang && rescueLang !== 'eng' && rescueLang !== task.lang) {
+                                        console.log(`[OCR] ${low.length} low-confidence words look like`,
+                                            rescueLang, '- re-running page with that model.');
+                                        task.lang = rescueLang;
+                                        requeuedForScript = true;
+                                        queue.unshift(task);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
                         completedTasks++;
                         w.pagesProcessed++;
-                        
+
                         const resultObj = { text: data ? data.text : '', words: data ? data.words : [] };
                         if (task.isSubTask) {
                             task.resolvedData = resultObj;
@@ -443,40 +490,76 @@
             return 'eng';
         }
 
-        try {
-            const detectPromise = osdWorker.detect(imagePayload);
+        const map = {
+            'Arabic': 'ara+eng',
+            'Latin': 'eng',
+            'Han': 'chi_sim+eng',
+            'Japanese': 'jpn+eng',
+            'Korean': 'kor+eng',
+            'Cyrillic': 'rus+eng',
+            'Greek': 'ell+eng',
+            'Devanagari': 'hin+eng'
+        };
+
+        // This OSD build reports script_confidence on a scale where ~2 is a
+        // clean, unambiguous page (measured: pure-Japanese 2.02, pure-English
+        // 2.43; the old threshold of 5 rejected every detection ever made).
+        // A weak NON-Latin reading is safe to act on: every route is a
+        // "<script>+eng" combo, so English text still reads fine — the only
+        // cost of a false positive is loading an extra model.
+        const detectOn = async (payload) => {
+            const detectPromise = osdWorker.detect(payload);
             const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('OSD Timeout')), 15000));
-
             const result = await Promise.race([detectPromise, timeoutPromise]);
-
-            if (!result || !result.data || !result.data.script) {
-                console.warn('OSD returned incomplete data, falling back to eng');
-                return 'eng';
-            }
-
-            const script = result.data.script;
-            const confidence = result.data.script_confidence || 0;
+            if (!result || !result.data || !result.data.script) return null;
             console.log('OSD Result:', result.data);
+            if ((result.data.script_confidence || 0) < 0.2) return null;
+            return result.data.script;
+        };
 
-            if (confidence < 5) {
-                console.warn('OSD confidence too low:', confidence, 'falling back to eng');
-                return 'eng';
+        try {
+            // OSD has two blind spots, each covered by an extra candidate view:
+            //  * it's DPI-sensitive — small glyphs misread as Latin or nothing,
+            //    but the same image at 2x resolves correctly (measured: sparse
+            //    mixed page = Latin@0.33 at 1x, Japanese@1.0 at 2x);
+            //  * it only reports the DOMINANT script, so a Japanese section on
+            //    a mostly-English page is invisible in the whole-page pass —
+            //    overlapping horizontal bands let a minority block dominate
+            //    its own band.
+            // Candidates are built lazily; the first non-Latin hit wins.
+            const candidates = [['page', () => imagePayload]];
+            if (imagePayload && imagePayload.getContext) {
+                const W = imagePayload.width, H = imagePayload.height;
+                if (W * H <= 4e6) {
+                    candidates.push(['page@2x', () => {
+                        const c = document.createElement('canvas');
+                        c.width = W * 2; c.height = H * 2;
+                        c.getContext('2d').drawImage(imagePayload, 0, 0, W * 2, H * 2);
+                        return c;
+                    }]);
+                }
+                if (H > 60) {
+                    const bandH = Math.ceil(H / 2);
+                    for (const y0 of [0, Math.floor((H - bandH) / 2), H - bandH]) {
+                        candidates.push([`band@${y0}`, () => {
+                            const c = document.createElement('canvas');
+                            c.width = W; c.height = bandH;
+                            c.getContext('2d').drawImage(imagePayload, 0, y0, W, bandH, 0, 0, W, bandH);
+                            return c;
+                        }]);
+                    }
+                }
             }
 
-            const map = {
-                'Arabic': 'ara+eng',
-                'Latin': 'eng',
-                'Han': 'chi_sim+eng',
-                'Japanese': 'jpn+eng',
-                'Korean': 'kor+eng',
-                'Cyrillic': 'rus+eng',
-                'Greek': 'ell+eng',
-                'Devanagari': 'hin+eng'
-            };
-
-            const detectedLang = map[script] || 'eng';
-            console.log('Routed Language:', detectedLang);
-            return detectedLang;
+            for (const [label, make] of candidates) {
+                const script = await detectOn(make());
+                if (script && script !== 'Latin' && map[script]) {
+                    console.log(`Routed Language (${label}):`, map[script]);
+                    return map[script];
+                }
+            }
+            console.log('Routed Language: eng');
+            return 'eng';
         } catch (err) {
             console.error('Inner OSD Error Details:', err, 'Falling back to eng');
             return 'eng';

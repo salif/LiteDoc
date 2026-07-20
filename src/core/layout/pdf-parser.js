@@ -7,19 +7,19 @@ import { topologicalSort, dbscan, inferFontStyle } from '../utils/geometry.js';
 // training/current_params.json). itemOverlapTolerance and garbageScoreThreshold
 // are not part of the search space and keep their hand-set defaults.
 const DEFAULT_CONFIG = {
-    horizontalGapMultiplier: 0.7521426180831484,
-    rowSplitMultiplier: 1.6814928388059278,
-    horizontalGapMin: 9,
-    bottomMarginThreshold: 0.8325418340129557,
-    topMarginThreshold: 0.1414407581914072,
-    distanceFromCenterPenalty: 4.99632617391084,
-    tableDensityThreshold: 0.8252067528442912,
-    pageGarbageRatioThreshold: 0.83503476251094,
-    paragraphGapThreshold: 1.3893865315064922,
-    continuationGapThreshold: 2.8802907493837626,
-    tableGapYThreshold: 4.927368708674492,
-    gapMultiplier: 1.7212538907054244,
-    ocrTolMultiplier: 3.439668945857592,
+    horizontalGapMultiplier: 1.219497353517404,
+    rowSplitMultiplier: 3.1024126595800956,
+    horizontalGapMin: 12,
+    bottomMarginThreshold: 0.8326907199134223,
+    topMarginThreshold: 0.10044413724016359,
+    distanceFromCenterPenalty: 4.840529410092541,
+    tableDensityThreshold: 0.6985618842172149,
+    pageGarbageRatioThreshold: 0.4554856547254581,
+    paragraphGapThreshold: 1.5088077796767423,
+    continuationGapThreshold: 2.346406152053748,
+    tableGapYThreshold: 2.055654766434288,
+    gapMultiplier: 0.6148540876742017,
+    ocrTolMultiplier: 2.733889345414216,
     itemOverlapTolerance: 4,
     garbageScoreThreshold: 0.20
 };
@@ -537,24 +537,14 @@ export const executePdfConversion = async function (files) {
             const pdfDoc = pdf.pdf ? pdf.pdf : pdf;
             logToTerminal(`Recognized. Pages: ${pdfDoc.numPages}`);
 
-            // Language Auto-Detect (OSD Router)
-            let docOcrLang = 'eng';
-            if (addons.__litedocAddons && addons.__litedocAddons.ocrEnabled() && addons.__litedocAddons._settings.ocrLang === 'auto') {
-                try {
-                    const pg1 = await pdfDoc.getPage(1);
-                    const vp = pg1.getViewport({ scale: 1.5 });
-                    const canv = document.createElement('canvas');
-                    canv.width = vp.width; canv.height = vp.height;
-                    const ctx = canv.getContext('2d');
-                    await pg1.render({ canvasContext: ctx, viewport: vp }).promise;
-                    if (window.__litedocOCR && window.__litedocOCR.detectScript) {
-                        docOcrLang = await window.__litedocOCR.detectScript(canv);
-                    }
-                    pg1.cleanup();
-                } catch (e) { docOcrLang = 'eng'; }
-            } else {
-                docOcrLang = (addons.__litedocAddons && addons.__litedocAddons._settings.ocrLang) || 'eng';
-            }
+            // OCR language: pass 'auto' straight through to the OCR queue.
+            // It resolves the script PER PAGE (whole page → 2x → bands) and
+            // has a post-OCR rescue: if the eng model returns a cluster of
+            // low-confidence garbage words, that crop is script-detected and
+            // the page re-OCR'd with the right "<script>+eng" combo. A
+            // doc-level pre-route can't do any of that (one Japanese line on
+            // an English page is invisible to whole-page script detection).
+            const docOcrLang = (addons.__litedocAddons && addons.__litedocAddons._settings.ocrLang) || 'eng';
 
             // pass 1: fingerprint
             let allRawLineTexts = [];
@@ -601,6 +591,10 @@ export const executePdfConversion = async function (files) {
 
             let mdText = `\x3C!-- Converted from ${file.name} — ${pdfDoc.numPages} pages --\x3E\n\n`;
             const extractedImages = [];
+            // Structured layout (per page: lines, tables, figures) — the same
+            // data the markdown is generated FROM, exposed for --json consumers
+            // instead of being thrown away at serialization.
+            const docLayout = [];
             const pageInlineRenders = {};
             const sharedCanvas = document.createElement('canvas');
             const sharedCtx = sharedCanvas.getContext('2d', { willReadFrequently: true });
@@ -807,6 +801,24 @@ export const executePdfConversion = async function (files) {
                     const medH = allLineGroups.map(l => l.height).sort((a,b) => a-b)[Math.floor(allLineGroups.length/2)] || 12;
                     const hThresh = utils.classifyHeadings(allLineGroups);
 
+                    const pageLayout = {
+                        page: pageNum,
+                        width: Math.round(pageW), height: Math.round(pageH),
+                        lines: allLineGroups
+                            .filter(l => !l.garbage && (l.text || '').trim())
+                            .map(l => ({
+                                text: l.text,
+                                y: Math.round(l.y * 100) / 100,
+                                x0: Math.round((l.xMin || 0) * 100) / 100,
+                                x1: Math.round((l.xMax || 0) * 100) / 100,
+                                font_size: l.fontSize || null,
+                                block: l.blockIdx || 1,
+                                ocr: !!(l.items && l.items.some(it => it.isOcr)),
+                            })),
+                        tables: [],
+                    };
+                    docLayout.push(pageLayout);
+
                     function linesToMd(lines) {
                         const mdArr = [];
                         let prevY = null, paragraphBuf = '', prevLine = null;
@@ -847,6 +859,7 @@ export const executePdfConversion = async function (files) {
                                 tableBuffer = []; tableColsBounds = []; return;
                             }
 
+                            pageLayout.tables.push({ rows: tableBuffer.map(r => r.slice()) });
                             mdArr.push('| ' + tableBuffer[0].join(' | ') + ' |');
                             mdArr.push('|' + Array(tableBuffer[0].length).fill('---').join('|') + '|');
                             for (let i = 1; i < tableBuffer.length; i++) mdArr.push('| ' + tableBuffer[i].join(' | ') + ' |');
@@ -952,7 +965,7 @@ export const executePdfConversion = async function (files) {
                 await processChunk(chunkStart, Math.min(chunkStart + CHUNK_SIZE - 1, pdfDoc.numPages));
             }
             await pdfDoc.destroy();
-            state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders, numPages: pdfDoc.numPages });
+            state.processedData.push({ filename: file.name, status: 'success', mdText, extractedImages, inlineRenders: pageInlineRenders, numPages: pdfDoc.numPages, layout: docLayout });
         } catch (err) { logToTerminal(`Failed: ${file.name}`, 'error'); }
     }
     updateProgress(100, 'Complete', '');
