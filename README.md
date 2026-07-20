@@ -13,6 +13,16 @@
 
 ---
 
+## Project Status
+
+LiteDoc is **stable and in maintenance mode.** v3.1.0 was the biggest release the project has had — the reconnected layout engine, real figure extraction, the CLI, and a continuous training pipeline all landed in one update — and it's a good place for the core engine to sit for a while. From here, updates will be bug fixes and small improvements as they come in rather than a fixed roadmap of new features.
+
+The optional AI cleanup feature is temporarily offline — the cloud account hosting it was suspended with no explanation and an open-ended appeal process (see `RELEASE_NOTES.md` for the full story). This doesn't affect the core app: extraction has always run 100% in your browser, and the CLI works fully offline too. AI cleanup comes back the moment there's somewhere to host it again.
+
+The project is open source, so if you want to keep pushing on the parser or the training pipeline yourself, everything you need is in this repo — see [Training & Heuristic Optimization](#training--heuristic-optimization) below.
+
+---
+
 ## Screenshots
 
 **Full Main UI with Files Loaded**
