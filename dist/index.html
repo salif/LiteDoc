@@ -5178,7 +5178,9 @@ window.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
             const containerRect = viewerWrapper.getBoundingClientRect();
-            let newWidthPercent = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+            // Use pageX for reliable coordinates in Chrome fullscreen
+            const clientX = e.pageX - window.scrollX;
+            let newWidthPercent = ((clientX - containerRect.left) / containerRect.width) * 100;
             newWidthPercent = Math.max(15, Math.min(85, newWidthPercent));
             state.splitRatio = newWidthPercent;
             
