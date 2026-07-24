@@ -9,6 +9,8 @@
             const isFailed = dataBlock.status === 'failed';
             const mdFilename = dataBlock.filename.replace('.pdf', '') + (isFailed ? '' : '.md');
             const folderName = `_pdf_images_${dataBlock.filename}`;
+            const lowConfPages = dataBlock.lowConfidencePages || [];
+            const hasLowConf = lowConfPages.length > 0;
 
             // md node
             const mdNode = document.createElement('div');
@@ -16,17 +18,45 @@
             mdNode.className = 'file-node';
             mdNode.setAttribute('tabindex', '0');
             mdNode.setAttribute('onclick', `selectVirtualFile(${fIndex}, 'md')`);
-            
+
             const iconColor = isFailed ? 'var(--danger)' : 'var(--accent)';
-            const badge = isFailed ? '<span class="error-badge">Error</span>' : '';
+            const errorBadge = isFailed ? '<span class="error-badge">Error</span>' : '';
+            const confBadge = hasLowConf
+                ? `<span class="low-conf-badge" onclick="event.stopPropagation(); toggleLowConfPages(${fIndex})" title="Click to navigate to low-confidence pages">
+                     ⚠ ${lowConfPages.length} low-confidence page${lowConfPages.length > 1 ? 's' : ''}
+                   </span>`
+                : '';
 
             mdNode.innerHTML = `
                 <div class="flex items-center gap-2 min-w-0 w-full">
                     <svg class="w-4 h-4 shrink-0" style="color:${iconColor}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2-0 01-2-2V5a2 2-0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                     <span class="truncate">${mdFilename}</span>
-                    ${badge}
+                    ${errorBadge}
+                    ${confBadge}
                 </div>`;
             fileGroup.appendChild(mdNode);
+
+            // Low-confidence sub-nodes (expandable)
+            if (hasLowConf) {
+                const lcList = document.createElement('div');
+                lcList.id = `file-node-lc-list-${fIndex}`;
+                lcList.className = 'space-y-1 pl-6 pt-1 lc-list-node';
+                lcList.style.display = 'none'; // collapsed by default
+                lowConfPages.forEach((lc, i) => {
+                    const lcNode = document.createElement('div');
+                    lcNode.id = `file-node-lc-${fIndex}-${i}`;
+                    lcNode.className = 'file-node low-conf-page-node';
+                    lcNode.setAttribute('tabindex', '0');
+                    lcNode.setAttribute('onclick', `navigateToLowConfPage(${fIndex}, ${lc.page})`);
+                    lcNode.innerHTML = `
+                        <div class="flex items-center gap-1.5 min-w-0 w-full">
+                            <svg class="w-3.5 h-3.5 shrink-0" style="color:var(--warn)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            <span class="truncate text-[10px]">Page ${lc.page} — ${lc.reasons.join(', ')}</span>
+                        </div>`;
+                    lcList.appendChild(lcNode);
+                });
+                fileGroup.appendChild(lcList);
+            }
 
             // images
             if (!isFailed && dataBlock.extractedImages.length > 0) {
@@ -238,16 +268,24 @@
         function filterFileTree(query) {
             const q = query.toLowerCase();
             const groups = document.querySelectorAll('.tree-group');
+            const lowConfOnly = state.showLowConfidenceOnly;
 
             groups.forEach(group => {
-                let groupHasMatch = false;
+                let groupVisible = false;
+
+                // check if this file has low confidence pages
+                const mdNode = group.querySelector('.file-node[id^="file-node-md"]');
+                const fIndex = mdNode ? parseInt(mdNode.getAttribute('onclick').match(/\d+/)[0]) : -1;
+                const dataBlock = state.processedData[fIndex];
+                const hasLowConf = dataBlock && (dataBlock.lowConfidencePages || []).length > 0;
+                const showByConf = !lowConfOnly || hasLowConf;
 
                 // filter md node
-                const mdNode = group.querySelector('.file-node[id^="file-node-md"]');
                 if (mdNode) {
-                    const mdMatch = mdNode.textContent.toLowerCase().includes(q);
-                    mdNode.style.display = mdMatch ? '' : 'none';
-                    if (mdMatch) groupHasMatch = true;
+                    const mdMatch = q === '' || mdNode.textContent.toLowerCase().includes(q);
+                    const show = mdMatch && showByConf;
+                    mdNode.style.display = show ? '' : 'none';
+                    if (show) groupVisible = true;
                 }
 
                 // filter image nodes
@@ -258,26 +296,223 @@
                 if (imgList) {
                     const imgNodes = imgList.querySelectorAll('.file-node');
                     imgNodes.forEach(node => {
-                        const match = node.textContent.toLowerCase().includes(q);
-                        node.style.display = match ? '' : 'none';
-                        if (match) imgMatchCount++;
+                        const match = q === '' || node.textContent.toLowerCase().includes(q);
+                        node.style.display = match && showByConf ? '' : 'none';
+                        if (match && showByConf) imgMatchCount++;
                     });
                 }
 
                 // hide/show folder container appropriately
                 if (folderNode && imgList) {
-                    if (q === '') {
-                        folderNode.style.display = '';
-                        imgList.style.display = '';
+                    if (q === '' && !lowConfOnly) {
+                        folderNode.style.display = imgMatchCount > 0 || showByConf ? '' : 'none';
+                        imgList.style.display = imgMatchCount > 0 || showByConf ? '' : 'none';
                     } else {
                         folderNode.style.display = imgMatchCount > 0 ? '' : 'none';
                         imgList.style.display = imgMatchCount > 0 ? '' : 'none';
                     }
                 }
 
-                if (imgMatchCount > 0) groupHasMatch = true;
-                group.style.display = groupHasMatch ? '' : 'none';
+                if (imgMatchCount > 0) groupVisible = true;
+                group.style.display = groupVisible ? '' : 'none';
             });
+        }
+
+        function toggleLowConfidenceFilter() {
+            state.showLowConfidenceOnly = !state.showLowConfidenceOnly;
+            const btn = document.getElementById('btn-low-conf-filter');
+            if (btn) {
+                btn.classList.toggle('low-conf-active', state.showLowConfidenceOnly);
+            }
+            filterFileTree(document.getElementById('file-tree-search')?.value || '');
+        }
+
+        // Expand/collapse low-confidence page list for a file
+        function toggleLowConfPages(fIndex) {
+            // First, make sure we're viewing the MD for this file
+            if (state.activeDataIndex !== fIndex) {
+                selectVirtualFile(fIndex, 'md');
+            }
+            const lcList = document.getElementById(`file-node-lc-list-${fIndex}`);
+            if (lcList) {
+                const isVisible = lcList.style.display !== 'none';
+                lcList.style.display = isVisible ? 'none' : '';
+            }
+        }
+
+        // Navigate editor to a specific low-confidence page
+        function navigateToLowConfPage(fIndex, pageNum) {
+            // Switch to this file's MD view if not already
+            if (state.activeDataIndex !== fIndex) {
+                selectVirtualFile(fIndex, 'md');
+            }
+            // Highlight the page node in the tree
+            document.querySelectorAll('.low-conf-page-node').forEach(n => n.classList.remove('active-md'));
+            const lcPages = state.processedData[fIndex]?.lowConfidencePages || [];
+            const pageIdx = lcPages.findIndex(p => p.page === pageNum);
+            const lcNode = document.getElementById(`file-node-lc-${fIndex}-${pageIdx >= 0 ? pageIdx : 0}`);
+            if (lcNode) lcNode.classList.add('active-md');
+
+            // Switch to raw mode if in rendered mode so highlights are visible
+            if (typeof window.setViewMode === 'function' && state.currentViewMode === 'rendered') {
+                window.setViewMode('raw');
+            }
+
+            // Wait for the editor to be ready after switching files
+            setTimeout(() => {
+                if (typeof window.mdEditor === 'undefined' || !window.mdEditor) return;
+                if (typeof window.ace === 'undefined') return;
+
+                // Clear previous highlights
+                _clearLowConfHighlights();
+
+                const sourceMap = state.processedData[fIndex]?.sourceMap || [];
+                const lowConfBlocks = sourceMap.filter(b => b.page === pageNum && b.confidence === 'low');
+
+                if (lowConfBlocks.length === 0) {
+                    // Fallback: no source map blocks — just scroll to page heading
+                    const md = state.processedData[fIndex]?.mdText || '';
+                    const pageHeading = `## Page ${pageNum}`;
+                    const idx = md.indexOf(pageHeading);
+                    if (idx !== -1) {
+                        const lineNum = md.substring(0, idx).split('\n').length;
+                        window.mdEditor.gotoLine(lineNum, 0, true);
+                    }
+                    return;
+                }
+
+                // Add Ace highlight markers for each low-confidence block
+                const ranges = [];
+
+                lowConfBlocks.forEach((block, bi) => {
+                    const [start, end] = block.md_range;
+                    const md = state.processedData[fIndex]?.mdText || '';
+                    if (end > md.length) return;
+
+                    const startLine = md.substring(0, start).split('\n').length - 1;
+                    const startCol = Math.max(0, start - (md.lastIndexOf('\n', start - 1) + 1));
+                    const endLine = md.substring(0, end).split('\n').length - 1;
+                    const endCol = Math.max(0, end - (md.lastIndexOf('\n', end - 1) + 1));
+
+                    const aceRange = new window.ace.Range(startLine, startCol, endLine, endCol);
+                    ranges.push(aceRange);
+                });
+
+                ranges.forEach((range, i) => {
+                    window.mdEditor.session.addMarker(range, 'ace_low_conf_highlight', 'text', false);
+                });
+                window._lowConfMarkers = ranges;
+
+                // Scroll to the first highlighted block
+                const firstRange = ranges[0];
+                if (firstRange) {
+                    window.mdEditor.scrollToLine(firstRange.start.row, true);
+                    window.mdEditor.focus();
+                }
+
+                // Also highlight in the rendered preview AND raw text view
+                _highlightRenderedPage(pageNum);
+                _highlightRawView(fIndex, pageNum);
+            }, 150);
+        }
+
+        // Highlight low-confidence blocks in the raw text view (pre/code block)
+        function _highlightRawView(fIndex, pageNum) {
+            const rawContainer = document.getElementById('viewer-md-container');
+            if (!rawContainer) return;
+
+            const sourceMap = state.processedData[fIndex]?.sourceMap || [];
+            const lowConfBlocks = sourceMap.filter(b => b.page === pageNum && b.confidence === 'low');
+            if (lowConfBlocks.length === 0) return;
+
+            const md = state.processedData[fIndex]?.mdText || '';
+
+            // Sort blocks by start position
+            lowConfBlocks.sort((a, b) => a.md_range[0] - b.md_range[0]);
+
+            // Build highlighted HTML: wrap each block's text in a <mark>
+            let result = '';
+            let pos = 0;
+            lowConfBlocks.forEach(block => {
+                const [start, end] = block.md_range;
+                // Add text before this block
+                result += escapeHtml(md.substring(pos, start));
+                // Add highlighted block
+                result += `<mark class="low-conf-page-block">${escapeHtml(md.substring(start, end))}</mark>`;
+                pos = end;
+            });
+            // Add remaining text after last block
+            result += escapeHtml(md.substring(pos));
+
+            rawContainer.innerHTML = result;
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Highlight low-confidence page in the rendered markdown preview
+        function _highlightRenderedPage(pageNum) {
+            const rendered = document.getElementById('viewer-md-rendered');
+            if (!rendered) return;
+
+            // Clear previous highlights
+            rendered.querySelectorAll('.low-conf-page-highlight').forEach(el => {
+                el.style.borderLeft = '';
+                el.style.background = '';
+                el.classList.remove('low-conf-page-highlight');
+            });
+
+            // Find all headings in the rendered preview
+            const headings = rendered.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            let targetHeading = null;
+            let targetIndex = -1;
+
+            for (let i = 0; i < headings.length; i++) {
+                const h = headings[i];
+                if (h.textContent.trim().includes(`Page ${pageNum}`)) {
+                    targetHeading = h;
+                    targetIndex = i;
+                    break;
+                }
+            }
+
+            if (!targetHeading) return;
+
+            // Collect all elements from this heading to the next page heading
+            const elements = [];
+            let el = targetHeading;
+            while (el) {
+                elements.push(el);
+                // Stop at next page heading
+                const next = el.nextElementSibling;
+                if (next && (next.tagName === 'H1' || next.tagName === 'H2' || next.tagName === 'H3') && next.textContent.trim().includes('Page') && next !== targetHeading) {
+                    break;
+                }
+                el = next;
+            }
+
+            // Apply highlight
+            elements.forEach((elem, idx) => {
+                elem.style.borderLeft = '3px solid rgba(245, 158, 11, 0.8)';
+                elem.style.background = 'rgba(245, 158, 11, 0.12)';
+                elem.style.paddingLeft = '8px';
+                elem.classList.add('low-conf-page-highlight');
+            });
+
+            // Scroll to the heading
+            targetHeading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function _clearLowConfHighlights() {
+            if (typeof window.mdEditor !== 'undefined' && window.mdEditor && window.mdEditor.session) {
+                const markers = window.mdEditor.session.getMarkers();
+                Object.keys(markers).forEach(id => {
+                    if (markers[id].clazz === 'ace_low_conf_highlight') {
+                        window.mdEditor.session.removeMarker(markers[id].id);
+                    }
+                });
+            }
         }
 
 function finishProcessing() {
@@ -301,5 +536,6 @@ window.renderFileToTree = renderFileToTree;
 window.updateSavingsUI = updateSavingsUI;
 window.selectVirtualFile = selectVirtualFile;
 window.filterFileTree = filterFileTree;
+window.toggleLowConfidenceFilter = toggleLowConfidenceFilter;
 window.finishProcessing = finishProcessing;
 
